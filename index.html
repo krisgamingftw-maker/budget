@@ -175,6 +175,11 @@
           <div class="code-box"><span class="num" id="codeText">—</span><button class="btn small" id="copyCode">העתקה</button></div>
           <p style="font-size:.8rem">מי שיש לו את הקוד יכול לראות ולערוך את התקציב, אז שתפו אותו רק עם מי שצריך.</p>
         </div>
+        <div class="card">
+          <h2>הצטרפות לתקציב של בן או בת הזוג</h2>
+          <p>אם כל אחד מכם פתח תקציב נפרד, אחד מכם מקליד כאן את הקוד של השני ועובר לתקציב המשותף.</p>
+          <div><button class="btn ghost small" id="joinOtherBtn">הצטרפות עם קוד</button></div>
+        </div>
         <div class="card" id="encCard">
           <h2 id="encTitle">הצפנת הנתונים</h2>
           <p id="encText"></p>
@@ -266,6 +271,10 @@
       <button type="button" id="dIn" aria-pressed="true">הפקדה</button>
       <button type="button" id="dOut" aria-pressed="false">משיכה</button>
     </div>
+  </div>
+  <div class="sgroup" data-for="joinother" style="display:flex;flex-direction:column;gap:12px">
+    <p class="sheet-note" id="joNote"></p>
+    <label class="field"><span>הקוד של התקציב המשותף</span><input id="joCode" class="num" dir="ltr" autocomplete="off" autocapitalize="characters" placeholder="ABCD-2345" maxlength="9" style="text-align:center;letter-spacing:.12em;font-size:1.2rem"></label>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>

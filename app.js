@@ -688,11 +688,12 @@
     setTimeout(() => { $('copyCode').textContent = 'העתקה'; }, 2000);
   };
   $('renameBtn').onclick = () => openSheet('rename');
+  $('joinOtherBtn').onclick = () => openSheet('joinOther');
   $('logoutBtn').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
   $('sLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
 
   // ---------- sheet ----------
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
@@ -707,6 +708,7 @@
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
+    if (mode === 'joinOther') { $('sheetTitle').textContent = 'הצטרפות לתקציב משותף'; $('joCode').value = ''; $('joNote').textContent = 'התקציב הנוכחי שלכם לא נמחק. אם תרצו לחזור אליו, הקוד שלו הוא ' + prettyCode(state.hid) + '. כדאי לשמור אותו.'; focus = 'joCode'; }
     if (mode === 'spend') { $('sheetTitle').textContent = obj.name; $('spAmount').value = ''; renderSpendSheet(obj); focus = 'spAmount'; }
     if (mode === 'savNew') { $('sheetTitle').textContent = 'חיסכון חדש'; $('svName').value = ''; $('svKind').value = 'קרן השתלמות'; $('svBalance').value = ''; $('svMonthly').value = ''; $('svEnd').value = ''; focus = 'svName'; }
     if (mode === 'savEdit') { $('sheetTitle').textContent = 'עריכת חיסכון'; $('svName').value = obj.name || ''; $('svKind').value = obj.kind || 'אחר'; $('svBalance').value = groupNum(obj.balance ?? ''); $('svMonthly').value = obj.monthly ? groupNum(obj.monthly) : ''; $('svEnd').value = obj.endDate || ''; }
@@ -719,7 +721,7 @@
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
-    $('saveBtn').textContent = mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
+    $('saveBtn').textContent = mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
     $('cancelBtn').hidden = mode === 'recovery';
     $('scrim').hidden = false; $('sheet').hidden = false;
@@ -779,6 +781,22 @@
         });
       }
       return closeSheet();
+    }
+    if (s.mode === 'joinOther') {
+      const code = cleanCode($('joCode').value);
+      if (code.length !== 8) { sheetError('הקוד צריך להיות 8 תווים, כמו ABCD-2345.'); return $('joCode').focus(); }
+      if (code === state.hid) return sheetError('זה הקוד של התקציב שאתם כבר נמצאים בו.');
+      const u = state.user; $('saveBtn').disabled = true;
+      try {
+        const ref = state.db.collection('households').doc(code);
+        const snap = await ref.get();
+        if (!snap.exists) { $('saveBtn').disabled = false; return sheetError('לא מצאנו תקציב עם הקוד הזה. בדקו שהוא הוקלד נכון.'); }
+        const members = (snap.data().members) || [];
+        if (!members.includes(u.uid)) await ref.update({ members: firebase.firestore.FieldValue.arrayUnion(u.uid), ['emails.' + u.uid]: u.email || '' });
+        await state.db.collection('users').doc(u.uid).set({ householdId: code }, { merge: true });
+      } catch (err) { $('saveBtn').disabled = false; return sheetError('ההצטרפות לא הצליחה. בדקו את החיבור ונסו שוב.'); }
+      $('saveBtn').disabled = false; closeSheet(); openHousehold(code);
+      return;
     }
     if (s.mode === 'spend') {
       const r = $('spAmount').value.trim(); const a = parseAmount(r);
