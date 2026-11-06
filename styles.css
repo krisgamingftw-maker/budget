@@ -44,7 +44,8 @@
 :root[data-theme="dark"][data-palette="teal"] { --bg: #0e1617; --paper: #152123; --line: #263739; --accent: #4cc3cc; --accent-deep: #2a959d; --accent-soft: #143336; }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html { padding-top: env(safe-area-inset-top, 0px); }
+html { padding-top: env(safe-area-inset-top, 0px); touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+button, a, input, label, .row, .tab { touch-action: manipulation; }
 body { margin: 0; }
 img { max-width: 100%; }
 [hidden] { display: none !important; }
