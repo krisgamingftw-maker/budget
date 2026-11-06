@@ -226,6 +226,16 @@
       <div class="t"><b>הוצאה קבועה</b><small>תעבור לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="fRec" aria-label="הוצאה קבועה"><i></i></label>
     </div>
+    <div class="switch-row">
+      <div class="t"><b>תקציב שמשתמשים בו בחלקים</b><small>למשל סופר: רושמים כל קנייה ורואים כמה נשאר</small></div>
+      <label class="switch"><input type="checkbox" id="fSplit" aria-label="תקציב בחלקים"><i></i></label>
+    </div>
+  </div>
+  <div class="sgroup" data-for="spend" style="display:flex;flex-direction:column;gap:12px">
+    <div class="sp-summary" id="spSummary"></div>
+    <label class="field"><span>כמה עלתה הקנייה ₪</span><input id="spAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <div id="spListWrap"><div class="sp-head">קניות החודש</div><ul class="sp-list" id="spList"></ul></div>
+    <button type="button" class="link-btn" id="spEdit" style="align-self:flex-start">עריכת שם וסכום התקציב</button>
   </div>
   <div class="sgroup" data-for="income">
     <label class="field"><span>הכנסה בחודש הזה ₪</span><input id="fIncome" class="num amount-input" inputmode="decimal" placeholder="0"></label>
