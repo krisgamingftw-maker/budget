@@ -861,11 +861,12 @@
       if (!Number.isFinite(monthly) || monthly < 0) { sheetError('ההפקדה החודשית צריכה להיות מספר.'); return $('svMonthly').focus(); }
       const body = { name, kind, balance, monthly, endDate };
       if (s.mode === 'savNew') {
-        write(async () => savRef(rid()).set(Object.assign(await seal(body, SAV_FIELDS), { createdAt: Date.now(), updatedAt: Date.now() })));
+        const sid = rid();
+        write(async () => { await savRef(sid).set(Object.assign(await seal(body, SAV_FIELDS), { createdAt: Date.now(), updatedAt: Date.now() })); return syncSavingExpense(sid, name, monthly); });
       } else {
         const old = state.savings.find(x => x.id === s.id) || {};
         const extra = (Number(old.balance) || 0) !== balance || (Number(old.monthly) || 0) !== monthly ? { updatedAt: Date.now() } : {};
-        write(async () => savRef(s.id).update(Object.assign(await seal(body, SAV_FIELDS, true), extra)));
+        write(async () => { await savRef(s.id).update(Object.assign(await seal(body, SAV_FIELDS, true), extra)); return syncSavingExpense(s.id, name, monthly); });
       }
       return closeSheet();
     }
@@ -962,6 +963,26 @@
     const body = { deposits: FV.arrayRemove(old) };
     if (it.linkType === 'goal' && !encrypted && typeof old.amount === 'number') body.saved = FV.increment(-old.amount);
     return ref.update(body);
+  }
+  // A saving with a fixed monthly deposit gets a matching recurring expense in the current month,
+  // linked to it, so paying it records the deposit.
+  async function syncSavingExpense(savId, name, monthly) {
+    const k = todayKey;
+    const existing = state.items.find(i => i.month === k && i.linkType === 'sav' && i.linkId === savId && !i.split);
+    if (monthly > 0) {
+      if (existing) {
+        if (Number(existing.amount) === monthly) return;
+        if (existing.paid) await linkDeposit(existing, false);
+        await itemRef(existing.id).update(await seal({ name: existing.name, amount: monthly }, ['name', 'amount'], true));
+        if (existing.paid) await linkDeposit(Object.assign({}, existing, { amount: monthly }), true);
+        return;
+      }
+      const items = monthItems(k);
+      const order = items.length ? Math.max(...items.map(i => i.order || 0)) + 1 : 1;
+      const doc = { month: k, name: 'הפקדה ל' + name, amount: monthly, paid: false, recurring: true, seriesId: rid(), order, split: false, linkType: 'sav', linkId: savId };
+      return itemRef(k + '_' + rid()).set(await seal(doc, ['name', 'amount']));
+    }
+    if (existing && !existing.paid) return itemRef(existing.id).delete();
   }
   function deleteItem(it) {
     write(async () => { if (it.paid) await linkDeposit(it, false); return itemRef(it.id).delete(); });

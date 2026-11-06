@@ -30,7 +30,7 @@ ok((await goalSaved()).includes('1,800'),'linked goal got deposit');
 if(!(await A.isVisible('#paidList')))await A.click('#togglePaid');await w(300);
 ok(await A.isVisible('#unpayAllBtn'),'unpay-all visible');await A.screenshot({path:'../bulk-paid.png',fullPage:true});
 await A.click('#unpayAllBtn');await A.click('#unpayAllBtn');await w(1200);
-ok(await A.locator('#openList .row').count()===4,'all back to open');ok((await goalSaved()).includes('1,000'),'goal deposit removed');
+ok(await A.locator('#openList .row').count()===5,'all back to open');ok((await goalSaved()).includes('1,000'),'goal deposit removed');
 // arm then wait 3.5s: resets
 await A.click('#payAllBtn');await w(3500);ok(!(await A.textContent('#payAllBtn')).includes('בטוח'),'arming expires');
 console.log(fail?fail+' FAILED':'ALL PASSED');await b.close();srv.close();process.exit(fail?1:0)});

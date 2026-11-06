@@ -28,11 +28,11 @@ const hh=await q('households');const hp=hh.documents[0].name.split('/documents/'
 const sv=await q(hp+'/savings');const keren=sv.documents.find(d=>JSON.stringify(d).includes('השתלמות'));
 const old=new Date();old.setMonth(old.getMonth()-3);
 await q(keren.name.split('/documents/')[1]+'?updateMask.fieldPaths=updatedAt',{method:'PATCH',body:JSON.stringify({fields:{updatedAt:{integerValue:String(old.getTime())}}})});await w(1200);
-const t2=await A.textContent('#savWrap');ok(t2.includes('89,500')&&t2.includes('3 הפקדות'),'estimate 85,000 + 3×1,500');
+const t2=await A.textContent('#savWrap');ok(t2.includes('85,000')&&(await A.textContent('#vMonth')).includes('הפקדה לקרן השתלמות'),'linked saving waits for recorded deposits; auto expense exists');
 await A.screenshot({path:'../sav-est.png',fullPage:true});
 // update balance
 await A.click('.goal:nth-of-type(1) .btn.small, #savWrap article:first-of-type .btn.small');await w(400);
-ok((await A.getAttribute('#sbAmount','placeholder'))==='89,500','placeholder shows estimate');
+ok((await A.getAttribute('#sbAmount','placeholder'))==='85,000','placeholder shows estimate');
 await A.fill('#sbAmount','90200');await A.click('#saveBtn');await w();
 const t3=await A.textContent('#savWrap');ok(t3.includes('90,200')&&!t3.includes('הפקדות מאז'),'balance updated, estimate reset');
 // edit
