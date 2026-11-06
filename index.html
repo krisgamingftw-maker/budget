@@ -138,6 +138,13 @@
       <div class="goals" id="goalsWrap"></div>
     </section>
 
+    <!-- Savings -->
+    <section id="vSavings" class="view" hidden>
+      <h1 class="page-title">חסכונות</h1>
+      <p class="page-sub" style="margin:4px 0 16px">קרן השתלמות, פיקדונות, קופות גמל וכל כסף שחוסכים לאורך זמן.</p>
+      <div class="goals" id="savWrap"></div>
+    </section>
+
     <!-- History -->
     <section id="vHistory" class="view" hidden>
       <h1 class="page-title">היסטוריה</h1>
@@ -201,6 +208,7 @@
   <nav class="tabbar" role="tablist" aria-label="ניווט">
     <button class="tab" role="tab" data-v="vMonth" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>החודש</button>
     <button class="tab" role="tab" data-v="vGoals" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>מטרות</button>
+    <button class="tab" role="tab" data-v="vSavings" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-6 9 6"/><path d="M5 10v9M9.7 10v9M14.3 10v9M19 10v9"/><path d="M3 20h18"/></svg>חסכונות</button>
     <button class="tab" role="tab" data-v="vHistory" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>היסטוריה</button>
     <button class="tab" role="tab" data-v="vSettings" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>הגדרות</button>
   </nav>
@@ -227,6 +235,19 @@
     <label class="field"><span>כמה צריך לחסוך ₪</span><input id="gTarget" class="num amount-input" inputmode="decimal" placeholder="0"></label>
     <label class="field"><span>עד מתי (לא חובה)</span><input id="gDate" type="month"></label>
     <label class="field" id="gStartWrap"><span>כמה כבר חסכתם ₪ (לא חובה)</span><input id="gStart" class="num" inputmode="decimal" placeholder="0"></label>
+  </div>
+  <div class="sgroup" data-for="saving" style="display:flex;flex-direction:column;gap:12px">
+    <label class="field"><span>שם</span><input id="svName" placeholder="למשל: קרן השתלמות של כריסטינה" maxlength="60"></label>
+    <label class="field"><span>סוג</span><select id="svKind">
+      <option>קרן השתלמות</option><option>פיקדון</option><option>קופת גמל</option><option>חיסכון לכל ילד</option><option>תיק השקעות</option><option>חשבון חיסכון</option><option>אחר</option>
+    </select></label>
+    <label class="field"><span>כמה יש בו היום ₪</span><input id="svBalance" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <label class="field"><span>הפקדה קבועה בכל חודש ₪ (לא חובה)</span><input id="svMonthly" class="num" inputmode="decimal" placeholder="0"></label>
+    <label class="field"><span>מתי הכסף משתחרר (לא חובה)</span><input id="svEnd" type="month"></label>
+  </div>
+  <div class="sgroup" data-for="savbal" style="display:flex;flex-direction:column;gap:12px">
+    <p class="sheet-note" id="sbNote"></p>
+    <label class="field"><span>היתרה העדכנית ₪</span><input id="sbAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
   </div>
   <div class="sgroup" data-for="deposit" style="display:flex;flex-direction:column;gap:12px">
     <label class="field"><span>סכום ₪</span><input id="dAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>

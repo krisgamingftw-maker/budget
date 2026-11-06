@@ -11,7 +11,7 @@
   const state = {
     fb: null, auth: null, db: null, user: null,
     hid: null, household: null,
-    items: [], months: {}, goals: [],
+    items: [], months: {}, goals: [], savings: [],
     loaded: false, unsubs: [],
     tab: 'vMonth', view: todayKey, showPaid: true,
     sheet: null, depositSign: 1, busy: false,
@@ -36,7 +36,7 @@
     int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return dec === null ? int : (int || '0') + '.' + dec;
   }
-  ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount'].forEach(id => {
+  ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount', 'svBalance', 'svMonthly', 'sbAmount'].forEach(id => {
     const inp = $(id);
     inp.addEventListener('input', () => {
       const caret = inp.selectionStart ?? inp.value.length;
@@ -76,6 +76,8 @@
   const itemRef = (id) => hh().collection('items').doc(id);
   const monthRef = (k) => hh().collection('months').doc(k);
   const goalRef = (id) => hh().collection('goals').doc(id);
+  const savRef = (id) => hh().collection('savings').doc(id);
+  const SAV_FIELDS = ['name', 'kind', 'balance', 'monthly', 'endDate'];
 
   function failMsg(e) {
     if (e && e.code === 'permission-denied') return 'אין הרשאה לשמור. נסו לצאת ולהיכנס שוב.';
@@ -138,14 +140,16 @@
     if (g.e || out.saved == null) out.saved = deps.reduce((s, d) => s + (Number(d.amount) || 0), 0);
     return out;
   }
-  const raw = { items: [], months: {}, goals: [] };
+  const raw = { items: [], months: {}, goals: [], savings: [] };
   let decodeRun = 0;
   async function decodeAll() {
     const run = ++decodeRun;
     const items = await Promise.all(raw.items.map(openDoc));
     const mk = Object.keys(raw.months); const mv = await Promise.all(mk.map(k => openDoc(raw.months[k])));
     const goals = await Promise.all(raw.goals.map(openGoal));
+    const savings = await Promise.all(raw.savings.map(openDoc));
     if (run !== decodeRun) return;
+    state.savings = savings;
     state.items = items; state.months = {}; mk.forEach((k, i) => { state.months[k] = mv[i]; }); state.goals = goals;
     render();
   }
@@ -176,6 +180,11 @@
       if (diff) list.push({ id: rid(), amount: diff, at: g.createdAt || Date.now() });
       body.deposits = await Promise.all(list.map(async x => x.e ? x : ({ id: x.id || rid(), at: x.at || Date.now(), e: await aesEnc(state.key, te.encode(JSON.stringify({ amount: Number(x.amount) || 0 }))) })));
       writes.push([goalRef(g.id), body]);
+    }
+    for (const v of raw.savings) {
+      if (v.e) continue;
+      const body = {}; SAV_FIELDS.forEach(f => { body[f] = v[f] ?? null; });
+      writes.push([savRef(v.id), await seal(body, SAV_FIELDS, true)]);
     }
     for (let i = 0; i < writes.length; i += 400) { const b = state.db.batch(); writes.slice(i, i + 400).forEach(([r, d]) => b.update(r, d)); await b.commit(); }
     return code;
@@ -248,8 +257,8 @@
     document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== t; });
     document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.v === t ? 'true' : 'false'));
     const fab = $('fab');
-    fab.hidden = !(t === 'vMonth' || t === 'vGoals');
-    $('fabText').textContent = t === 'vGoals' ? 'מטרה חדשה' : 'הוצאה חדשה';
+    fab.hidden = !(t === 'vMonth' || t === 'vGoals' || t === 'vSavings');
+    $('fabText').textContent = t === 'vGoals' ? 'מטרה חדשה' : t === 'vSavings' ? 'חיסכון חדש' : 'הוצאה חדשה';
     window.scrollTo(0, 0);
     render();
   }
@@ -265,6 +274,7 @@
     if (!state.hid) return;
     renderMonth();
     if (state.tab === 'vGoals') renderGoals();
+    if (state.tab === 'vSavings') renderSavings();
     if (state.tab === 'vHistory') renderHistory();
     if (state.tab === 'vSettings') renderSettings();
   }
@@ -345,8 +355,8 @@
     del.innerHTML = TRASH_SVG; const dl = el('span', '', 'מחיקה'); del.append(dl);
     del.setAttribute('aria-label', 'מחיקת ' + name); del.tabIndex = -1;
     outer.classList.add('swipeable'); outer.append(del, inner);
-    let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null;
-    const set = (v, anim) => { pos = v; inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
+    let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null, justSwiped = false;
+    const set = (v, anim) => { pos = v; outer.classList.toggle('swiped', v > 0); inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
     const ctl = { outer, close() { set(0, true); disarm(); if (openSwipe === ctl) openSwipe = null; } };
     function disarm() { armed = false; clearTimeout(armTimer); outer.classList.remove('armed'); dl.textContent = 'מחיקה'; }
     inner.addEventListener('pointerdown', e => {
@@ -371,15 +381,16 @@
       if (e.pointerId !== id) return; id = null;
       if (mode !== 'swipe') return;
       if (pos > SWIPE_W / 2) { set(SWIPE_W, true); openSwipe = ctl; } else ctl.close();
-      // swallow the click that follows the drag
-      const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
-      inner.addEventListener('click', stop, { capture: true, once: true });
-      setTimeout(() => inner.removeEventListener('click', stop, { capture: true }), 50);
+      // swallow the click that follows a mouse drag
+      justSwiped = true; setTimeout(() => { justSwiped = false; }, 60);
     };
     inner.addEventListener('pointerup', end);
     inner.addEventListener('pointercancel', e => { if (e.pointerId === id && mode === 'swipe') end(e); else id = null; });
     // a tap on an open row closes it instead of opening the editor
-    inner.addEventListener('click', e => { if (pos > 0) { e.stopPropagation(); e.preventDefault(); ctl.close(); } }, true);
+    inner.addEventListener('click', e => {
+      if (justSwiped) { e.stopPropagation(); e.preventDefault(); return; }
+      if (pos > 0) { e.stopPropagation(); e.preventDefault(); ctl.close(); }
+    }, true);
     del.onclick = () => {
       if (!armed) { armed = true; outer.classList.add('armed'); dl.textContent = 'בטוח?'; armTimer = setTimeout(disarm, 3000); return; }
       disarm(); openSwipe = null; outer.classList.add('removing');
@@ -462,6 +473,58 @@
         card.append(ul);
       }
       wrap.append(swipeable(card, g.name, () => write(() => goalRef(g.id).delete())));
+    }
+  }
+
+
+  // ---------- savings ----------
+  function dateKey(ms) { const d = new Date(ms || Date.now()); return keyOf(d.getFullYear(), d.getMonth() + 1); }
+  function shortDate(ms) { const d = new Date(ms || 0); return d.getDate() + '.' + (d.getMonth() + 1) + '.' + String(d.getFullYear()).slice(2); }
+  // Months of fixed deposits since the balance was last entered.
+  function savMonthsSince(v) { return v.updatedAt ? Math.max(0, monthIndex(todayKey) - monthIndex(dateKey(v.updatedAt))) : 0; }
+  function savEstimate(v) { return (Number(v.balance) || 0) + (Number(v.monthly) || 0) * savMonthsSince(v); }
+  function renderSavings() {
+    const wrap = $('savWrap'); wrap.textContent = '';
+    const list = state.savings.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    if (!list.length) {
+      const c = el('div', 'empty-card');
+      c.append(el('b', '', 'עוד אין חסכונות'), el('span', '', 'לחצו על "חיסכון חדש" כדי להוסיף קרן השתלמות, פיקדון או כל חיסכון אחר, עם הפקדה חודשית קבועה אם יש.'));
+      wrap.append(c); return;
+    }
+    const total = list.reduce((s, v) => s + savEstimate(v), 0);
+    const monthlyTotal = list.reduce((s, v) => s + (Number(v.monthly) || 0), 0);
+    const tot = el('div', 'goals-total');
+    const l = el('div'); l.append(el('div', 'k', 'סך כל החסכונות'), el('div', 'v num', fmt(Math.round(total))));
+    tot.append(l);
+    if (monthlyTotal) { const r = el('div', 'k sav-monthly'); r.append('הפקדות קבועות'); r.append(el('b', 'num', fmt(monthlyTotal))); r.append('בכל חודש'); tot.append(r); }
+    wrap.append(tot);
+    const nowIdx = monthIndex(todayKey);
+    for (const v of list) {
+      const card = el('article', 'goal');
+      const head = el('div', 'goal-head');
+      const av = el('span', 'avatar', initial(v.name)); av.setAttribute('aria-hidden', 'true');
+      const title = el('div', 'goal-title');
+      title.append(el('b', '', v.name), el('small', '', (v.kind || 'חיסכון') + (v.endDate ? ' · משתחרר ב' + label(v.endDate) : '')));
+      const edit = el('button', 'goal-edit'); edit.innerHTML = EDIT_SVG; edit.setAttribute('aria-label', 'עריכת ' + v.name);
+      edit.onclick = () => openSheet('savEdit', v);
+      head.append(av, title, edit);
+      const est = savEstimate(v), since = savMonthsSince(v), monthly = Number(v.monthly) || 0;
+      const nums = el('div', 'goal-nums');
+      nums.append(el('span', 'goal-saved num', fmt(Math.round(est))));
+      if (since && monthly) nums.append(el('span', 'sav-est', 'משוער, כולל ' + (since === 1 ? 'הפקדה אחת' : since + ' הפקדות') + ' מאז העדכון'));
+      const facts = el('ul', 'sav-facts');
+      const fact = (k, val) => { const li = el('li'); li.append(el('span', '', k), el('b', 'num', val)); facts.append(li); };
+      if (monthly) fact('הפקדה קבועה בחודש', fmt(monthly));
+      if (since && monthly) fact('יתרה בעדכון האחרון', fmt(Number(v.balance) || 0));
+      if (v.endDate && monthly) { const left = monthIndex(v.endDate) - nowIdx; if (left > 0) fact('צפי ב' + label(v.endDate), fmt(Math.round(est + monthly * left))); }
+      fact('עודכן לאחרונה', shortDate(v.updatedAt || v.createdAt));
+      const foot = el('div', 'goal-foot');
+      foot.append(el('span', 'goal-tip', ''));
+      const upd = el('button', 'btn small', 'עדכון יתרה'); upd.type = 'button';
+      upd.onclick = () => openSheet('savBal', v);
+      foot.append(upd);
+      card.append(head, nums, facts, foot);
+      wrap.append(swipeable(card, v.name, () => write(() => savRef(v.id).delete())));
     }
   }
 
@@ -563,13 +626,13 @@
   $('sLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
 
   // ---------- sheet ----------
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
     sheetError('');
     $('confirmBox').hidden = true; $('sheetActions').hidden = false;
-    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit');
+    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit');
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
     if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; focus = 'fAmount'; }
@@ -578,6 +641,9 @@
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
+    if (mode === 'savNew') { $('sheetTitle').textContent = 'חיסכון חדש'; $('svName').value = ''; $('svKind').value = 'קרן השתלמות'; $('svBalance').value = ''; $('svMonthly').value = ''; $('svEnd').value = ''; focus = 'svName'; }
+    if (mode === 'savEdit') { $('sheetTitle').textContent = 'עריכת חיסכון'; $('svName').value = obj.name || ''; $('svKind').value = obj.kind || 'אחר'; $('svBalance').value = groupNum(obj.balance ?? ''); $('svMonthly').value = obj.monthly ? groupNum(obj.monthly) : ''; $('svEnd').value = obj.endDate || ''; }
+    if (mode === 'savBal') { $('sheetTitle').textContent = obj.name; $('sbNote').textContent = 'הכניסו את הסכום שמופיע עכשיו בדוח או באפליקציה של הבנק. ההערכה של ההפקדות הקבועות תתחיל מחדש מהיום.'; $('sbAmount').value = ''; $('sbAmount').placeholder = groupNum(Math.round(savEstimate(obj))); focus = 'sbAmount'; }
     if (mode === 'encpass') {
       state.sheet.enable = !!obj.enable; state.sheet.reset = !!obj.reset;
       $('sheetTitle').textContent = obj.enable ? 'הפעלת הצפנה' : 'סיסמה משפחתית חדשה';
@@ -677,6 +743,32 @@
       });
       return closeSheet();
     }
+    if (s.mode === 'savNew' || s.mode === 'savEdit') {
+      const name = $('svName').value.trim(); const kind = $('svKind').value;
+      const balRaw = $('svBalance').value.trim(); const balance = balRaw ? parseAmount(balRaw) : 0;
+      const monRaw = $('svMonthly').value.trim(); const monthly = monRaw ? parseAmount(monRaw) : 0;
+      const endDate = /^\d{4}-\d{2}$/.test($('svEnd').value) ? $('svEnd').value : null;
+      if (!name) { sheetError('צריך לתת שם, למשל "קרן השתלמות".'); return $('svName').focus(); }
+      if (!Number.isFinite(balance) || balance < 0) { sheetError('היתרה צריכה להיות מספר, למשל 25,000.'); return $('svBalance').focus(); }
+      if (!Number.isFinite(monthly) || monthly < 0) { sheetError('ההפקדה החודשית צריכה להיות מספר.'); return $('svMonthly').focus(); }
+      const body = { name, kind, balance, monthly, endDate };
+      if (s.mode === 'savNew') {
+        write(async () => savRef(rid()).set(Object.assign(await seal(body, SAV_FIELDS), { createdAt: Date.now(), updatedAt: Date.now() })));
+      } else {
+        const old = state.savings.find(x => x.id === s.id) || {};
+        const extra = (Number(old.balance) || 0) !== balance || (Number(old.monthly) || 0) !== monthly ? { updatedAt: Date.now() } : {};
+        write(async () => savRef(s.id).update(Object.assign(await seal(body, SAV_FIELDS, true), extra)));
+      }
+      return closeSheet();
+    }
+    if (s.mode === 'savBal') {
+      const r = $('sbAmount').value.trim(); const balance = parseAmount(r);
+      if (!r || !Number.isFinite(balance) || balance < 0) { sheetError('צריך לכתוב את היתרה, למשל 25,000.'); return $('sbAmount').focus(); }
+      const old = state.savings.find(x => x.id === s.id) || {};
+      const body = {}; SAV_FIELDS.forEach(f => { body[f] = old[f] ?? null; }); body.balance = balance;
+      write(async () => savRef(s.id).update(Object.assign(await seal(body, SAV_FIELDS, true), { updatedAt: Date.now() })));
+      return closeSheet();
+    }
     if (s.mode === 'rename') {
       const name = $('rName').value.trim();
       if (!name) return sheetError('צריך לכתוב שם.');
@@ -689,7 +781,7 @@
   $('scrim').onclick = closeSheet;
   $('deleteBtn').onclick = () => {
     const s = state.sheet || {};
-    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : (state.items.find(i => i.id === s.id) || {}).name;
+    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : (state.items.find(i => i.id === s.id) || {}).name;
     $('confirmText').textContent = 'למחוק את "' + (name || '') + '"?';
     $('confirmBox').hidden = false; $('sheetActions').hidden = true;
   };
@@ -697,6 +789,7 @@
   $('confirmYes').onclick = () => {
     const s = state.sheet || {}; if (!s.id) return;
     if (s.mode === 'goalEdit') write(() => goalRef(s.id).delete());
+    else if (s.mode === 'savEdit') write(() => savRef(s.id).delete());
     else write(() => itemRef(s.id).delete());
     closeSheet();
   };
@@ -729,7 +822,7 @@
   $('togglePaid').onclick = () => { state.showPaid = !state.showPaid; try { localStorage.setItem('budget-showpaid', state.showPaid ? '1' : '0'); } catch (e) {} render(); };
   $('incomeBtn').onclick = () => openSheet('income');
   $('carryBtn').onclick = carryOver;
-  $('fab').onclick = () => openSheet(state.tab === 'vGoals' ? 'goalNew' : 'add');
+  $('fab').onclick = () => openSheet(state.tab === 'vGoals' ? 'goalNew' : state.tab === 'vSavings' ? 'savNew' : 'add');
 
   // ---------- auth ----------
   let authMode = 'login';
@@ -828,8 +921,8 @@
   function stopListening() { state.unsubs.forEach(f => { try { f(); } catch (e) {} }); state.unsubs = []; }
   function openHousehold(hid) {
     stopListening();
-    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = [];
-    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = [];
+    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = []; raw.savings = [];
+    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = []; state.savings = [];
     show('loading');
     const db = state.db; const base = db.collection('households').doc(hid);
     let got = { items: false, months: false };
@@ -854,6 +947,10 @@
     state.unsubs.push(base.collection('months').onSnapshot({ includeMetadataChanges: true }, snap => {
       const m = {}; snap.docs.forEach(d => { m[d.id] = d.data(); }); raw.months = m;
       if (!snap.metadata.fromCache) { got.months = true; ready(); }
+      decodeAll();
+    }, onErr));
+    state.unsubs.push(base.collection('savings').onSnapshot(snap => {
+      raw.savings = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
       decodeAll();
     }, onErr));
     state.unsubs.push(base.collection('goals').onSnapshot(snap => {
