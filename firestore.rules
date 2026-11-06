@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(hid) {
+      return signedIn() && request.auth.uid in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    }
+
+    // Each person stores only which family budget they belong to.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // A family budget. Its id is the 8-letter join code.
+    match /households/{hid} {
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
+      // Members can rename it but not remove anyone.
+      allow update: if (isMember(hid) && request.resource.data.members == resource.data.members)
+        // Someone with the code can add only themselves.
+        || (signedIn() && !(request.auth.uid in resource.data.members)
+            && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'emails']));
+
+      // Expenses, months and goals: members only.
+      match /{sub}/{rest=**} {
+        allow read, write: if isMember(hid);
+      }
+    }
+  }
+}

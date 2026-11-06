@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>התקציב שלנו</title>
+<meta name="theme-color" content="#1f7a52">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="תקציב">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Sign in / sign up -->
+<div class="login" id="auth" hidden>
+  <form class="login-card" id="authForm" autocomplete="on">
+    <div class="logo" aria-hidden="true">₪</div>
+    <h1>התקציב שלנו</h1>
+    <p class="sub" id="authSub">ניהול הוצאות חודשי למשפחה</p>
+    <label class="field"><span>מייל</span><input id="aEmail" type="email" autocomplete="username" dir="ltr" required></label>
+    <label class="field" id="aPassWrap"><span>סיסמה</span><input id="aPass" type="password" autocomplete="current-password" dir="ltr" minlength="6"></label>
+    <p class="sheet-error" id="aErr" hidden></p>
+    <p class="notice ok" id="aOk" hidden></p>
+    <button class="btn" type="submit" id="aBtn">כניסה</button>
+    <div class="footer-actions">
+      <button type="button" class="link-btn strong" id="aSwitch">אין לכם חשבון? הרשמה</button>
+      <button type="button" class="link-btn" id="aForgot">שכחתי סיסמה</button>
+    </div>
+  </form>
+</div>
+
+<!-- First time: create or join a family budget -->
+<div class="login" id="setup" hidden>
+  <div class="login-card">
+    <div class="logo" aria-hidden="true">₪</div>
+    <h1>ברוכים הבאים</h1>
+    <p class="sub">כל משפחה מקבלת תקציב נפרד ופרטי משלה.</p>
+    <form class="choice" id="createForm">
+      <label class="field"><span>שם לתקציב</span><input id="sName" placeholder="למשל: משפחת כהן" maxlength="60"></label>
+      <button class="btn" type="submit" id="sCreate">יצירת תקציב חדש</button>
+    </form>
+    <div class="or">או</div>
+    <form class="choice" id="joinForm">
+      <label class="field"><span>קוד הצטרפות מבן או בת הזוג</span><input id="sCode" class="num" dir="ltr" placeholder="ABCD-2345" autocomplete="off" autocapitalize="characters" style="text-align:center;letter-spacing:.1em"></label>
+      <button class="btn ghost" type="submit" id="sJoin">הצטרפות לתקציב קיים</button>
+    </form>
+    <p class="sheet-error" id="sErr" hidden></p>
+    <button type="button" class="link-btn" id="sLogout">יציאה מהחשבון</button>
+  </div>
+</div>
+
+<div class="login" id="loading"><p class="sub" style="color:var(--muted)">טוען…</p></div>
+
+<!-- The app -->
+<div id="shell" hidden>
+  <div class="app" dir="rtl">
+
+    <!-- Month -->
+    <section id="vMonth" class="view">
+      <header class="topbar">
+        <button class="nav-btn" id="prev" aria-label="החודש הקודם"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        <h1><span id="monthTitle">…</span><small id="monthSub"></small></h1>
+        <button class="nav-btn" id="next" aria-label="החודש הבא"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+      </header>
+      <div style="display:flex;justify-content:center;margin-top:-10px" id="todayWrap" hidden><button class="today-link" id="toToday">חזרה לחודש הנוכחי</button></div>
+
+      <div style="display:flex;flex-direction:column;gap:18px;margin-top:12px">
+        <section class="hero" aria-label="סיכום החודש">
+          <div class="hero-top">
+            <div>
+              <div class="hero-label" id="remainLabel">נשאר לשלם</div>
+              <div class="hero-amount num" id="remain">0 ₪</div>
+            </div>
+            <div class="ring" aria-hidden="true">
+              <svg viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="34" fill="none" stroke-width="8"/><circle class="prog" id="ringProg" cx="40" cy="40" r="34" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="213.6"/></svg>
+              <span class="num" id="ringPct">0%</span>
+            </div>
+          </div>
+          <div class="hero-stats">
+            <div class="hero-stat"><div class="k">סה״כ הוצאות</div><div class="v num" id="sTotal">0 ₪</div></div>
+            <div class="hero-stat"><div class="k">שולם</div><div class="v num" id="sPaid">0 ₪</div></div>
+          </div>
+          <button class="income-btn" id="incomeBtn"><span id="incomeText">הוספת הכנסה חודשית (לא חובה)</span><b class="num" id="balance"></b></button>
+        </section>
+
+        <div class="notice" id="status" hidden></div>
+
+        <section class="carry" id="carry" hidden>
+          <div class="carry-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg></div>
+          <div class="carry-body">
+            <p id="carryText"></p>
+            <button class="btn small" id="carryBtn">להעביר לחודש הזה</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>לתשלום</h2><span class="meta" id="openMeta"></span></div>
+          <ul class="list" id="openList"><li class="empty">טוען…</li></ul>
+        </section>
+
+        <section class="section" id="paidSec" hidden>
+          <div class="section-head"><h2>שולם</h2><button class="toggle-paid" id="togglePaid"></button></div>
+          <ul class="list" id="paidList"></ul>
+        </section>
+      </div>
+    </section>
+
+    <!-- Goals -->
+    <section id="vGoals" class="view" hidden>
+      <h1 class="page-title">מטרות חיסכון</h1>
+      <p class="page-sub" style="margin:4px 0 16px">חוסכים יחד לטיול, למוצר חדש או לכל דבר אחר.</p>
+      <div class="goals" id="goalsWrap"></div>
+    </section>
+
+    <!-- History -->
+    <section id="vHistory" class="view" hidden>
+      <h1 class="page-title">היסטוריה</h1>
+      <p class="page-sub" style="margin:4px 0 16px">איך נראו החודשים הקודמים.</p>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="chart-card" id="chartCard">
+          <div class="chart-head"><b>הוצאות לפי חודש</b><span id="chartAvg"></span></div>
+          <div class="chart" id="chart"></div>
+        </div>
+        <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="hSearch" type="search" placeholder="חיפוש הוצאה, למשל: סופר" aria-label="חיפוש הוצאה בכל החודשים"></label>
+        <div class="search-res" id="hResults" hidden></div>
+        <div class="hist-list" id="histList"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="vSettings" class="view" hidden>
+      <h1 class="page-title">הגדרות</h1>
+      <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+        <div class="card">
+          <h2 id="hhName">התקציב שלנו</h2>
+          <p id="hhMembers"></p>
+          <button class="btn ghost small" id="renameBtn">שינוי שם</button>
+        </div>
+        <div class="card">
+          <h2>צירוף בן או בת הזוג</h2>
+          <p>שלחו להם את קישור האפליקציה ואת הקוד הזה. אחרי ההרשמה הם בוחרים "הצטרפות לתקציב קיים" ומקלידים אותו.</p>
+          <div class="code-box"><span class="num" id="codeText">—</span><button class="btn small" id="copyCode">העתקה</button></div>
+          <p style="font-size:.8rem">מי שיש לו את הקוד יכול לראות ולערוך את התקציב, אז שתפו אותו רק עם מי שצריך.</p>
+        </div>
+        <div class="card">
+          <h2>צבע האפליקציה</h2>
+          <div class="palette" role="group" aria-label="צבע האפליקציה" style="justify-content:flex-start">
+            <button class="swatch" data-p="green" aria-label="ירוק" style="background:#1f7a52"></button>
+            <button class="swatch" data-p="blue" aria-label="כחול" style="background:#2563a8"></button>
+            <button class="swatch" data-p="purple" aria-label="סגול" style="background:#6b47b8"></button>
+            <button class="swatch" data-p="pink" aria-label="ורוד" style="background:#c2416f"></button>
+            <button class="swatch" data-p="teal" aria-label="טורקיז" style="background:#0f7c86"></button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>החשבון שלי</h2>
+          <p id="whoami"></p>
+          <button class="btn ghost small" id="logoutBtn">יציאה</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <button class="fab" id="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span id="fabText">הוצאה חדשה</span></button>
+
+  <nav class="tabbar" role="tablist" aria-label="ניווט">
+    <button class="tab" role="tab" data-v="vMonth" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>החודש</button>
+    <button class="tab" role="tab" data-v="vGoals" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>מטרות</button>
+    <button class="tab" role="tab" data-v="vHistory" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>היסטוריה</button>
+    <button class="tab" role="tab" data-v="vSettings" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>הגדרות</button>
+  </nav>
+</div>
+
+<!-- Bottom sheet used by every form -->
+<div class="scrim" id="scrim" hidden></div>
+<form class="sheet" id="sheet" dir="rtl" autocomplete="off" hidden aria-modal="true" role="dialog" aria-labelledby="sheetTitle">
+  <div class="grab" aria-hidden="true"></div>
+  <h3 id="sheetTitle"></h3>
+  <div class="sgroup" data-for="item" style="display:flex;flex-direction:column;gap:12px">
+    <label class="field"><span>סכום ₪</span><input id="fAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <label class="field"><span>על מה</span><input id="fName" placeholder="למשל: חשמל" maxlength="80"></label>
+    <div class="switch-row">
+      <div class="t"><b>הוצאה קבועה</b><small>תעבור לחודש הבא בלחיצה</small></div>
+      <label class="switch"><input type="checkbox" id="fRec" aria-label="הוצאה קבועה"><i></i></label>
+    </div>
+  </div>
+  <div class="sgroup" data-for="income">
+    <label class="field"><span>הכנסה בחודש הזה ₪</span><input id="fIncome" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+  </div>
+  <div class="sgroup" data-for="goal" style="display:flex;flex-direction:column;gap:12px">
+    <label class="field"><span>שם המטרה</span><input id="gName" placeholder="למשל: טיול ליוון" maxlength="60"></label>
+    <label class="field"><span>כמה צריך לחסוך ₪</span><input id="gTarget" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <label class="field"><span>עד מתי (לא חובה)</span><input id="gDate" type="month"></label>
+    <label class="field" id="gStartWrap"><span>כמה כבר חסכתם ₪ (לא חובה)</span><input id="gStart" class="num" inputmode="decimal" placeholder="0"></label>
+  </div>
+  <div class="sgroup" data-for="deposit" style="display:flex;flex-direction:column;gap:12px">
+    <label class="field"><span>סכום ₪</span><input id="dAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <div class="seg" role="group" aria-label="סוג פעולה" style="align-self:flex-start">
+      <button type="button" id="dIn" aria-pressed="true">הפקדה</button>
+      <button type="button" id="dOut" aria-pressed="false">משיכה</button>
+    </div>
+  </div>
+  <div class="sgroup" data-for="rename">
+    <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>
+  </div>
+  <p class="sheet-error" id="sheetError" hidden></p>
+  <div class="confirm" id="confirmBox" hidden>
+    <p id="confirmText"></p>
+    <div><button type="button" class="btn danger" id="confirmYes">כן, למחוק</button><button type="button" class="btn ghost" id="confirmNo">ביטול</button></div>
+  </div>
+  <div class="sheet-actions" id="sheetActions">
+    <button type="submit" class="btn" id="saveBtn">שמירה</button>
+    <button type="button" class="btn ghost" id="cancelBtn">ביטול</button>
+    <button type="button" class="btn danger-ghost" id="deleteBtn" hidden>מחיקה</button>
+  </div>
+</form>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
+</script>
+</body>
+</html>
