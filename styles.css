@@ -320,3 +320,6 @@ img, svg { -webkit-user-drag: none; }
 .row.paid .check.add svg { color: var(--on-accent); }
 .field-hint { font-size: .78rem; color: var(--muted); }
 #fLinkWrap.dim { opacity: .45; }
+/* no initial-letter badges */
+.avatar { display: none !important; }
+.row > .swipe-in { padding-inline: 10px 8px; min-height: 56px; }
