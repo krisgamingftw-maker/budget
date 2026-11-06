@@ -318,3 +318,5 @@ img, svg { -webkit-user-drag: none; }
 .sp-del { border: 0; background: var(--bg); color: var(--muted); min-width: 30px; height: 30px; border-radius: 10px; font-size: 1.1rem; padding: 0 8px; }
 .sp-del.armed { background: var(--danger); color: #fff; font-size: .8rem; font-weight: 700; }
 .row.paid .check.add svg { color: var(--on-accent); }
+.field-hint { font-size: .78rem; color: var(--muted); }
+#fLinkWrap.dim { opacity: .45; }

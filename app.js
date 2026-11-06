@@ -157,7 +157,11 @@
     const items = await Promise.all(raw.items.map(openItem));
     const mk = Object.keys(raw.months); const mv = await Promise.all(mk.map(k => openDoc(raw.months[k])));
     const goals = await Promise.all(raw.goals.map(openGoal));
-    const savings = await Promise.all(raw.savings.map(openDoc));
+    const savings = await Promise.all(raw.savings.map(async v => {
+      const out = await openDoc(v);
+      out.deposits = await Promise.all((Array.isArray(v.deposits) ? v.deposits : []).map(openDoc));
+      return out;
+    }));
     if (run !== decodeRun) return;
     state.savings = savings;
     state.items = items; state.months = {}; mk.forEach((k, i) => { state.months[k] = mv[i]; }); state.goals = goals;
@@ -198,9 +202,12 @@
       writes.push([goalRef(g.id), body]);
     }
     for (const v of raw.savings) {
-      if (v.e) continue;
-      const body = {}; SAV_FIELDS.forEach(f => { body[f] = v[f] ?? null; });
-      writes.push([savRef(v.id), await seal(body, SAV_FIELDS, true)]);
+      const sp = Array.isArray(v.deposits) && v.deposits.some(x => !x.e);
+      if (v.e && !sp) continue;
+      const body = {};
+      if (!v.e) { const plain = {}; SAV_FIELDS.forEach(f => { plain[f] = v[f] ?? null; }); Object.assign(body, await seal(plain, SAV_FIELDS, true)); }
+      if (sp) body.deposits = await Promise.all(v.deposits.map(x => x.e ? x : sealAmount(x)));
+      writes.push([savRef(v.id), body]);
     }
     for (let i = 0; i < writes.length; i += 400) { const b = state.db.batch(); writes.slice(i, i + 400).forEach(([r, d]) => b.update(r, d)); await b.commit(); }
     return code;
@@ -436,7 +443,14 @@
       body.append(av, tx, el('span', 'row-amt num', fmt(spent)));
       body.onclick = () => openSheet('spend', it);
     } else {
-      if (it.recurring) { const sub = el('span', 'row-sub'); sub.innerHTML = REPEAT_SVG; sub.append('קבוע כל חודש'); tx.append(sub); }
+      const tgt = linkTarget(it);
+      if (it.recurring || tgt) {
+        const sub = el('span', 'row-sub');
+        if (it.recurring) { sub.innerHTML = REPEAT_SVG; sub.append('קבוע'); }
+        if (tgt) { if (it.recurring) sub.append(' · '); sub.append('הפקדה ל' + tgt.name); }
+        else if (it.recurring) sub.append(' כל חודש');
+        tx.append(sub);
+      }
       body.append(av, tx, el('span', 'row-amt num', fmt(Number(it.amount) || 0)));
       body.onclick = () => openSheet('edit', it);
     }
@@ -444,14 +458,14 @@
       const add = el('button', 'check add'); add.innerHTML = PLUS_SVG; add.setAttribute('aria-label', 'הוספת קנייה: ' + it.name);
       add.onclick = () => openSheet('spend', it);
       row.append(body, add);
-      return swipeable(row, it.name, () => write(() => itemRef(it.id).delete()));
+      return swipeable(row, it.name, () => deleteItem(it));
     }
     const chk = el('button', 'check'); chk.innerHTML = CHECK_SVG;
     chk.setAttribute('aria-pressed', it.paid ? 'true' : 'false');
     chk.setAttribute('aria-label', (it.paid ? 'בטל סימון שולם: ' : 'סמן כשולם: ') + it.name);
     chk.onclick = () => togglePaid(it);
     row.append(body, chk);
-    return swipeable(row, it.name, () => write(() => itemRef(it.id).delete()));
+    return swipeable(row, it.name, () => deleteItem(it));
   }
 
   // ---------- goals ----------
@@ -520,7 +534,14 @@
   function shortDate(ms) { const d = new Date(ms || 0); return d.getDate() + '.' + (d.getMonth() + 1) + '.' + String(d.getFullYear()).slice(2); }
   // Months of fixed deposits since the balance was last entered.
   function savMonthsSince(v) { return v.updatedAt ? Math.max(0, monthIndex(todayKey) - monthIndex(dateKey(v.updatedAt))) : 0; }
-  function savEstimate(v) { return (Number(v.balance) || 0) + (Number(v.monthly) || 0) * savMonthsSince(v); }
+  // A saving fed by an expense line counts the deposits recorded since the last balance update;
+  // otherwise the fixed monthly deposit is assumed.
+  const savLinked = (v) => state.items.some(i => i.linkType === 'sav' && i.linkId === v.id && !i.split);
+  const savNewDeps = (v) => (v.deposits || []).filter(d => (d.at || 0) > (v.updatedAt || 0));
+  function savEstimate(v) {
+    if (savLinked(v)) return (Number(v.balance) || 0) + savNewDeps(v).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    return (Number(v.balance) || 0) + (Number(v.monthly) || 0) * savMonthsSince(v);
+  }
   function renderSavings() {
     const wrap = $('savWrap'); wrap.textContent = '';
     const list = state.savings.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -549,11 +570,14 @@
       const est = savEstimate(v), since = savMonthsSince(v), monthly = Number(v.monthly) || 0;
       const nums = el('div', 'goal-nums');
       nums.append(el('span', 'goal-saved num', fmt(Math.round(est))));
-      if (since && monthly) nums.append(el('span', 'sav-est', 'משוער, כולל ' + (since === 1 ? 'הפקדה אחת' : since + ' הפקדות') + ' מאז העדכון'));
+      const linked = savLinked(v), nd = savNewDeps(v);
+      if (linked && nd.length) nums.append(el('span', 'sav-est', 'כולל ' + (nd.length === 1 ? 'הפקדה אחת' : nd.length + ' הפקדות') + ' מהתקציב מאז העדכון'));
+      else if (!linked && since && monthly) nums.append(el('span', 'sav-est', 'משוער, כולל ' + (since === 1 ? 'הפקדה אחת' : since + ' הפקדות') + ' מאז העדכון'));
       const facts = el('ul', 'sav-facts');
       const fact = (k, val) => { const li = el('li'); li.append(el('span', '', k), el('b', 'num', val)); facts.append(li); };
       if (monthly) fact('הפקדה קבועה בחודש', fmt(monthly));
-      if (since && monthly) fact('יתרה בעדכון האחרון', fmt(Number(v.balance) || 0));
+      if (linked) { const ln = state.items.find(i => i.linkType === 'sav' && i.linkId === v.id); fact('מקושר להוצאה', ln ? ln.name : ''); }
+      if ((linked && nd.length) || (!linked && since && monthly)) fact('יתרה בעדכון האחרון', fmt(Number(v.balance) || 0));
       if (v.endDate && monthly) { const left = monthIndex(v.endDate) - nowIdx; if (left > 0) fact('צפי ב' + label(v.endDate), fmt(Math.round(est + monthly * left))); }
       fact('עודכן לאחרונה', shortDate(v.updatedAt || v.createdAt));
       const foot = el('div', 'goal-foot');
@@ -673,8 +697,8 @@
     $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit');
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
-    if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; focus = 'fAmount'; }
-    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; $('fSplit').checked = !!obj.split; }
+    if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); focus = 'fAmount'; }
+    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; $('fSplit').checked = !!obj.split; fillLink(obj); }
     if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); const inc = Number((state.months[state.view] || {}).income) || 0; $('fIncome').value = inc ? groupNum(inc) : ''; focus = 'fIncome'; }
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
@@ -731,17 +755,24 @@
       if (!amtRaw || !Number.isFinite(amount) || amount < 0) { sheetError('צריך לכתוב סכום, למשל 350.'); return $('fAmount').focus(); }
       if (!name) { sheetError('צריך לכתוב על מה ההוצאה.'); return $('fName').focus(); }
       const recurring = $('fRec').checked, split = $('fSplit').checked;
+      const lv = split ? '' : $('fLink').value; const linkType = lv ? lv.split(':')[0] : null, linkId = lv ? lv.split(':')[1] : null;
       if (s.mode === 'add') {
         const items = monthItems(state.view);
         const order = items.length ? Math.max(...items.map(i => i.order || 0)) + 1 : 1;
-        const doc = { month: state.view, name, amount, paid: false, recurring, order, split };
+        const doc = { month: state.view, name, amount, paid: false, recurring, order, split, linkType, linkId };
         if (recurring) doc.seriesId = rid();
         write(async () => itemRef(state.view + '_' + rid()).set(await seal(doc, ['name', 'amount'])));
       } else {
         const it = state.items.find(x => x.id === s.id); if (!it) return closeSheet();
-        const patch = { name, amount, recurring, split };
+        const patch = { name, amount, recurring, split, linkType, linkId };
         if (recurring && !it.seriesId) patch.seriesId = rid();
-        write(async () => itemRef(it.id).update(await seal(patch, ['name', 'amount'], true)));
+        const after = Object.assign({}, it, patch);
+        const relink = it.paid && (it.linkId !== linkId || Number(it.amount) !== amount || !!it.split !== split);
+        write(async () => {
+          if (relink) await linkDeposit(it, false);
+          await itemRef(it.id).update(await seal(patch, ['name', 'amount'], true));
+          if (relink) return linkDeposit(after, true);
+        });
       }
       return closeSheet();
     }
@@ -837,11 +868,24 @@
     const s = state.sheet || {}; if (!s.id) return;
     if (s.mode === 'goalEdit') write(() => goalRef(s.id).delete());
     else if (s.mode === 'savEdit') write(() => savRef(s.id).delete());
-    else write(() => itemRef(s.id).delete());
+    else { const it = state.items.find(x => x.id === s.id); if (it) deleteItem(it); }
     closeSheet();
   };
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.sheet) closeSheet(); });
 
+  function fillLink(it) {
+    const sel = $('fLink'); sel.textContent = '';
+    sel.append(new Option('לא, הוצאה רגילה', ''));
+    const add = (label, list, type) => { if (!list.length) return; const g = document.createElement('optgroup'); g.label = label; list.forEach(x => g.append(new Option(x.name, type + ':' + x.id))); sel.append(g); };
+    add('מטרות', state.goals.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), 'goal');
+    add('חסכונות', state.savings.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), 'sav');
+    sel.value = it && it.linkId ? it.linkType + ':' + it.linkId : '';
+    if (sel.value === '' && it && it.linkId) sel.value = '';
+    $('fLinkWrap').hidden = !state.goals.length && !state.savings.length;
+    syncLinkVis();
+  }
+  function syncLinkVis() { $('fLinkWrap').classList.toggle('dim', $('fSplit').checked); $('fLink').disabled = $('fSplit').checked; }
+  $('fSplit').addEventListener('change', syncLinkVis);
   function renderSpendSheet(it) {
     const amt = Number(it.amount) || 0, spent = it.spent || 0, rest = amt - spent;
     const sum = $('spSummary'); sum.textContent = '';
@@ -864,11 +908,39 @@
     }
   }
   $('spEdit').onclick = () => { const it = state.items.find(x => x.id === (state.sheet || {}).id); if (it) openSheet('edit', it); };
+  // An expense can feed a goal or a saving: marking it paid records a deposit there.
+  const linkTarget = (it) => it && !it.split && it.linkId ? (it.linkType === 'goal' ? state.goals.find(g => g.id === it.linkId) : it.linkType === 'sav' ? state.savings.find(v => v.id === it.linkId) : null) : null;
+  const linkDepId = (it) => 'item_' + it.id;
+  async function linkDeposit(it, on) {
+    if (!it || it.split || !it.linkId) return;
+    const FV = firebase.firestore.FieldValue;
+    const ref = it.linkType === 'goal' ? goalRef(it.linkId) : it.linkType === 'sav' ? savRef(it.linkId) : null;
+    if (!ref) return;
+    const rawDoc = (it.linkType === 'goal' ? raw.goals : raw.savings).find(x => x.id === it.linkId);
+    if (!rawDoc) return; // the goal or saving was deleted
+    const encrypted = !!rawDoc.e && state.key;
+    const old = (Array.isArray(rawDoc.deposits) ? rawDoc.deposits : []).find(x => x.id === linkDepId(it));
+    if (on) {
+      if (old) return;
+      const amount = Number(it.amount) || 0; if (!amount) return;
+      const entry = { id: linkDepId(it), amount, at: Date.now(), fromItem: true };
+      const body = { deposits: FV.arrayUnion(encrypted ? Object.assign(await sealAmount(entry), { fromItem: true }) : entry) };
+      if (it.linkType === 'goal' && !encrypted) body.saved = FV.increment(amount);
+      return ref.update(body);
+    }
+    if (!old) return;
+    const body = { deposits: FV.arrayRemove(old) };
+    if (it.linkType === 'goal' && !encrypted && typeof old.amount === 'number') body.saved = FV.increment(-old.amount);
+    return ref.update(body);
+  }
+  function deleteItem(it) {
+    write(async () => { if (it.paid) await linkDeposit(it, false); return itemRef(it.id).delete(); });
+  }
   function togglePaid(it) {
     const paid = !it.paid;
     state.items = state.items.map(x => x.id === it.id ? Object.assign({}, x, { paid }) : x);
     render();
-    write(() => itemRef(it.id).update({ paid }));
+    write(async () => { await itemRef(it.id).update({ paid }); return linkDeposit(Object.assign({}, it, { paid }), paid); });
   }
   function carryOver() {
     const k = state.view; const src = sourceMonth(k); if (!src) return;
@@ -877,7 +949,7 @@
     write(async () => {
       const batch = state.db.batch();
       // Same id on both phones, so tapping together still adds each item once.
-      for (const it of rec) batch.set(itemRef(k + '_' + it.seriesId), await seal({ month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0, split: !!it.split }, ['name', 'amount']));
+      for (const it of rec) batch.set(itemRef(k + '_' + it.seriesId), await seal({ month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0, split: !!it.split, linkType: it.linkType || null, linkId: it.linkId || null }, ['name', 'amount']));
       batch.set(monthRef(k), { carried: true }, { merge: true });
       return batch.commit();
     });
