@@ -267,3 +267,5 @@ button { cursor: pointer; }
 .link-btn.strong { color: var(--accent); font-weight: 600; text-decoration: none; }
 .notice.ok { background: var(--accent-soft); border-color: transparent; }
 textarea { font: inherit; }
+.btn.google { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; }
+.btn.google svg { width: 20px; height: 20px; }

@@ -472,6 +472,7 @@
     $('authSub').textContent = m === 'signup' ? 'יצירת חשבון חדש. הסיסמה צריכה לפחות 6 תווים.' : m === 'reset' ? 'נשלח לכם מייל עם קישור לבחירת סיסמה חדשה.' : 'ניהול הוצאות חודשי למשפחה';
     $('aSwitch').textContent = m === 'login' ? 'אין לכם חשבון? הרשמה' : 'כבר יש לכם חשבון? כניסה';
     $('aForgot').hidden = m !== 'login';
+    $('aGoogle').hidden = m === 'reset'; $('aOr').hidden = m === 'reset';
   }
   $('aSwitch').onclick = () => setAuthMode(authMode === 'login' ? 'signup' : 'login');
   $('aForgot').onclick = () => setAuthMode('reset');
@@ -486,6 +487,23 @@
     if (c.includes('operation-not-allowed')) return 'ההרשמה עוד לא הופעלה באפליקציה.';
     return 'משהו לא הצליח. נסו שוב.';
   }
+  $('aGoogle').onclick = async () => {
+    $('aErr').hidden = true; $('aGoogle').disabled = true;
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try { await state.auth.signInWithPopup(provider); }
+    catch (err) {
+      const c = (err && err.code) || '';
+      if (c.includes('popup-blocked') || c.includes('operation-not-supported')) {
+        try { await state.auth.signInWithRedirect(provider); return; } catch (e2) { err = e2; }
+      }
+      if (!c.includes('popup-closed') && !c.includes('cancelled-popup')) {
+        $('aErr').textContent = c.includes('unauthorized-domain') ? 'הכניסה עם Google עוד לא הופעלה לכתובת הזאת.' : c.includes('account-exists') ? 'כבר יש חשבון עם המייל הזה. היכנסו עם מייל וסיסמה.' : authError(err);
+        $('aErr').hidden = false;
+      }
+    }
+    $('aGoogle').disabled = false;
+  };
   $('authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = $('aEmail').value.trim(), pass = $('aPass').value;
@@ -585,6 +603,7 @@
   else state.db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
   setAuthMode('login');
 
+  state.auth.getRedirectResult().catch(() => {});
   state.auth.onAuthStateChanged(async (u) => {
     stopListening();
     state.user = u; state.hid = null; state.household = null;
