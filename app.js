@@ -687,6 +687,15 @@
     catch (e) { const r = document.createRange(); r.selectNodeContents($('codeText')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     setTimeout(() => { $('copyCode').textContent = 'העתקה'; }, 2000);
   };
+  const APP_URL = location.origin + location.pathname.replace(/index\.html$/, '');
+  async function shareOrCopy(btn, data, label) {
+    if (navigator.share) { try { await navigator.share(data); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText((data.text ? data.text + '\n' : '') + data.url); btn.textContent = 'הקישור הועתק'; }
+    catch (e) { btn.textContent = data.url; }
+    setTimeout(() => { btn.textContent = label; }, 2500);
+  }
+  $('shareAppBtn').onclick = () => shareOrCopy($('shareAppBtn'), { title: 'התקציב', text: 'אפליקציה לניהול תקציב חודשי למשפחה. נכנסים, נרשמים ופותחים תקציב משלכם:', url: APP_URL }, 'שיתוף האפליקציה');
+  $('shareCodeBtn').onclick = () => shareOrCopy($('shareCodeBtn'), { title: 'התקציב שלנו', text: 'הצטרפות לתקציב המשותף שלנו: פותחים את הקישור, נרשמים, בוחרים "הצטרפות לתקציב קיים" ומקלידים את הקוד ' + prettyCode(state.hid) + '\n(אם כבר יש לך תקציב: הגדרות ← הצטרפות עם קוד)', url: APP_URL }, 'שליחת הקוד והקישור');
   $('renameBtn').onclick = () => openSheet('rename');
   $('joinOtherBtn').onclick = () => openSheet('joinOther');
   $('logoutBtn').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
