@@ -529,7 +529,7 @@
     if (s.mode === 'recovery') { if ($('recSaved').checked) closeSheet(); return; }
     if (s.mode === 'encpass') {
       const p1 = $('epPass').value, p2 = $('epPass2').value;
-      if (p1.length < 6) { sheetError('הסיסמה צריכה לפחות 6 תווים.'); return $('epPass').focus(); }
+      if (p1.length < 4) { sheetError('הסיסמה צריכה לפחות 4 תווים.'); return $('epPass').focus(); }
       if (p1 !== p2) { sheetError('הסיסמאות לא זהות.'); return $('epPass2').focus(); }
       $('saveBtn').disabled = true; $('saveBtn').textContent = 'רגע…';
       try {
