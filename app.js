@@ -32,7 +32,7 @@
   function newCode() { let s = ''; const a = new Uint32Array(8); crypto.getRandomValues(a); for (const v of a) s += CODE_ABC[v % CODE_ABC.length]; return s; }
   function prettyCode(c) { return c ? c.slice(0, 4) + '-' + c.slice(4) : '—'; }
   function cleanCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
-  function show(id) { ['auth', 'setup', 'loading', 'shell'].forEach(x => { $(x).hidden = x !== id; }); }
+  function show(id) { state.screen = id; ['auth', 'setup', 'unlock', 'loading', 'shell'].forEach(x => { $(x).hidden = x !== id; }); }
   function status(msg) { const e = $('status'); e.textContent = msg || ''; e.hidden = !msg; }
 
   // ---------- palette ----------
@@ -65,6 +65,159 @@
     try { const p = fn(); if (p && p.catch) p.catch(e => { status(failMsg(e)); }); return true; }
     catch (e) { status(failMsg(e)); return false; }
   }
+
+  // ---------- family encryption ----------
+  // Names and amounts are encrypted on the phone with a random budget key. That key is
+  // stored in the budget twice: locked with the family password and with a recovery code.
+  // Each device keeps the unlocked key, so the password is typed once per device.
+  const te = new TextEncoder(), td = new TextDecoder();
+  const ITER = 250000;
+  const b64 = (u8) => { let s = ''; u8 = new Uint8Array(u8); for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
+  const unb64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const decCache = new Map();
+  async function deriveKey(secret, salt) {
+    const base = await crypto.subtle.importKey('raw', te.encode(secret), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function aesEnc(key, bytes) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes));
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return b64(out);
+  }
+  async function aesDec(key, str) { const all = unb64(str); return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.slice(0, 12) }, key, all.slice(12))); }
+  async function wrapKey(rawKey, secret) { const salt = crypto.getRandomValues(new Uint8Array(16)); return { s: b64(salt), w: await aesEnc(await deriveKey(secret, salt), rawKey) }; }
+  async function unwrapKey(wrapped, secret) { return aesDec(await deriveKey(secret, unb64(wrapped.s)), wrapped.w); }
+  async function importDataKey(raw) { return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']); }
+  function newRecoveryCode() { let s = ''; const a = new Uint32Array(20); crypto.getRandomValues(a); for (const v of a) s += CODE_ABC[v % CODE_ABC.length]; return s; }
+  const prettyRecovery = (c) => c.match(/.{1,5}/g).join('-');
+  const dkStoreKey = () => 'budget-dk-' + state.hid;
+  function rememberKey(raw) { try { localStorage.setItem(dkStoreKey(), b64(raw)); } catch (e) {} }
+  function forgetKeys() { try { Object.keys(localStorage).filter(k => k.startsWith('budget-dk-')).forEach(k => localStorage.removeItem(k)); } catch (e) {} }
+  const isEncrypted = () => !!(state.household && state.household.crypto);
+  async function seal(obj, fields, merge) {
+    if (!isEncrypted() || !state.key) return obj;
+    const secret = {}; const rest = Object.assign({}, obj);
+    for (const f of fields) { if (f in rest) { secret[f] = rest[f]; delete rest[f]; if (merge) rest[f] = firebase.firestore.FieldValue.delete(); } }
+    rest.e = await aesEnc(state.key, te.encode(JSON.stringify(secret)));
+    return rest;
+  }
+  async function openDoc(d) {
+    if (!d || !d.e) return d;
+    if (!state.key) return Object.assign({}, d, { name: '🔒', locked: true });
+    let v = decCache.get(d.e);
+    if (!v) { try { v = JSON.parse(td.decode(await aesDec(state.key, d.e))); } catch (err) { v = { name: '(לא ניתן לפענח)' }; } decCache.set(d.e, v); }
+    const out = Object.assign({}, d, v); delete out.e; return out;
+  }
+  async function openGoal(g) {
+    const out = await openDoc(g);
+    const deps = await Promise.all((Array.isArray(g.deposits) ? g.deposits : []).map(openDoc));
+    out.deposits = deps;
+    if (g.e || out.saved == null) out.saved = deps.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    return out;
+  }
+  const raw = { items: [], months: {}, goals: [] };
+  let decodeRun = 0;
+  async function decodeAll() {
+    const run = ++decodeRun;
+    const items = await Promise.all(raw.items.map(openDoc));
+    const mk = Object.keys(raw.months); const mv = await Promise.all(mk.map(k => openDoc(raw.months[k])));
+    const goals = await Promise.all(raw.goals.map(openGoal));
+    if (run !== decodeRun) return;
+    state.items = items; state.months = {}; mk.forEach((k, i) => { state.months[k] = mv[i]; }); state.goals = goals;
+    render();
+  }
+  async function tryStoredKey() {
+    if (state.key) return true;
+    let s = null; try { s = localStorage.getItem(dkStoreKey()); } catch (e) {}
+    if (!s) return false;
+    try { state.key = await importDataKey(unb64(s)); return true; } catch (e) { return false; }
+  }
+  async function enableEncryption(pass) {
+    const rawKey = crypto.getRandomValues(new Uint8Array(32));
+    const code = newRecoveryCode();
+    const cryptoDoc = { v: 1, iter: ITER, p: await wrapKey(rawKey, pass), r: await wrapKey(rawKey, code), at: Date.now() };
+    state.key = await importDataKey(rawKey); rememberKey(rawKey);
+    state.household = Object.assign({}, state.household, { crypto: cryptoDoc });
+    await hh().update({ crypto: cryptoDoc });
+    // Encrypt what is already stored.
+    const FV = firebase.firestore.FieldValue; const writes = [];
+    for (const d of raw.items) if (!d.e) writes.push([itemRef(d.id), await seal({ name: d.name || '', amount: Number(d.amount) || 0 }, ['name', 'amount'], true)]);
+    for (const k of Object.keys(raw.months)) { const m = raw.months[k]; if (!m.e && m.income != null) writes.push([monthRef(k), await seal({ income: Number(m.income) || 0 }, ['income'], true)]); }
+    for (const g of raw.goals) {
+      if (g.e) continue;
+      const body = await seal({ name: g.name || '', target: Number(g.target) || 0, deadline: g.deadline || null }, ['name', 'target', 'deadline'], true);
+      body.saved = FV.delete();
+      const deps = Array.isArray(g.deposits) ? g.deposits : [];
+      const known = deps.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      const list = deps.slice(); const diff = (Number(g.saved) || 0) - known;
+      if (diff) list.push({ id: rid(), amount: diff, at: g.createdAt || Date.now() });
+      body.deposits = await Promise.all(list.map(async x => x.e ? x : ({ id: x.id || rid(), at: x.at || Date.now(), e: await aesEnc(state.key, te.encode(JSON.stringify({ amount: Number(x.amount) || 0 }))) })));
+      writes.push([goalRef(g.id), body]);
+    }
+    for (let i = 0; i < writes.length; i += 400) { const b = state.db.batch(); writes.slice(i, i + 400).forEach(([r, d]) => b.update(r, d)); await b.commit(); }
+    return code;
+  }
+  async function changeSecret(kind, secret) {
+    const rawKey = new Uint8Array(await crypto.subtle.exportKey('raw', await currentRawKeyHolder()));
+    const c = Object.assign({}, state.household.crypto); c[kind] = await wrapKey(rawKey, secret);
+    await hh().update({ crypto: c });
+  }
+  // The device copy of the key is the extractable one we keep in storage.
+  async function currentRawKeyHolder() {
+    let s = null; try { s = localStorage.getItem(dkStoreKey()); } catch (e) {}
+    if (!s) throw new Error('no-key');
+    return crypto.subtle.importKey('raw', unb64(s), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+  }
+  function renderEncCard() {
+    const on = isEncrypted();
+    $('encTitle').textContent = on ? 'הנתונים מוצפנים' : 'הצפנת הנתונים';
+    $('encText').textContent = on
+      ? 'שמות וסכומים נשמרים מוצפנים, ורק מי שיודע את הסיסמה המשפחתית יכול לקרוא אותם. גם מנהלת השרת לא.'
+      : 'אפשר להצפין את שמות ההוצאות והסכומים עם סיסמה משפחתית, כך שאף אחד מחוץ למשפחה לא יוכל לקרוא אותם, גם לא מנהלת השרת. מקלידים את הסיסמה פעם אחת בכל טלפון, ומקבלים קוד שחזור למקרה ששוכחים.';
+    $('encOnBtn').hidden = on; $('encPassBtn').hidden = !on; $('encCodeBtn').hidden = !on;
+  }
+
+  // ---------- unlock ----------
+  let unlockMode = 'pass';
+  function setUnlockMode(m) {
+    unlockMode = m; $('uErr').hidden = true;
+    $('uPassWrap').hidden = m !== 'pass'; $('uCodeWrap').hidden = m !== 'code';
+    $('uSwitch').textContent = m === 'pass' ? 'שכחתי את הסיסמה, יש לי קוד שחזור' : 'יש לי את הסיסמה המשפחתית';
+  }
+  $('uSwitch').onclick = () => setUnlockMode(unlockMode === 'pass' ? 'code' : 'pass');
+  $('uLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
+  $('unlockForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const c = state.household && state.household.crypto; if (!c) return;
+    const secret = unlockMode === 'pass' ? $('uPass').value : cleanCode($('uCode').value);
+    if (!secret) return;
+    $('uBtn').disabled = true; $('uBtn').textContent = 'פותח…'; $('uErr').hidden = true;
+    try {
+      const rawKey = await unwrapKey(unlockMode === 'pass' ? c.p : c.r, secret);
+      state.key = await importDataKey(rawKey); rememberKey(rawKey);
+      $('uPass').value = ''; $('uCode').value = '';
+      show('shell'); setTab('vMonth'); decodeAll();
+      if (unlockMode === 'code') openSheet('encpass', { reset: true });
+    } catch (err) {
+      $('uErr').textContent = unlockMode === 'pass' ? 'הסיסמה לא נכונה. נסו שוב.' : 'קוד השחזור לא נכון. בדקו שהוא הוקלד במלואו.';
+      $('uErr').hidden = false;
+    }
+    $('uBtn').disabled = false; $('uBtn').textContent = 'פתיחה';
+  });
+  $('encOnBtn').onclick = () => openSheet('encpass', { enable: true });
+  $('encPassBtn').onclick = () => openSheet('encpass', {});
+  $('encCodeBtn').onclick = async () => {
+    try { const code = newRecoveryCode(); await changeSecret('r', code); openSheet('recovery', { code }); }
+    catch (e) { status('לא הצלחנו ליצור קוד חדש. בדקו את החיבור ונסו שוב.'); }
+  };
+  $('recCopy').onclick = async () => { try { await navigator.clipboard.writeText($('recCode').textContent); $('recCopy').textContent = 'הועתק'; } catch (e) { const r = document.createRange(); r.selectNodeContents($('recCode')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } setTimeout(() => { $('recCopy').textContent = 'העתקה'; }, 2000); };
+  $('recEmail').onclick = () => {
+    const to = (state.user && state.user.email) || '';
+    const name = (state.household && state.household.name) || 'התקציב';
+    const body = 'קוד השחזור של "' + name + '" באפליקציית התקציב:\n\n' + $('recCode').textContent + '\n\nצריך אותו רק אם שוכחים את הסיסמה המשפחתית. אל תשתפו אותו עם אף אחד מחוץ למשפחה.\n\n' + location.origin + location.pathname;
+    location.href = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent('קוד שחזור לתקציב') + '&body=' + encodeURIComponent(body);
+  };
+  $('recSaved').onchange = () => { $('saveBtn').disabled = !$('recSaved').checked; };
 
   // ---------- tabs ----------
   function setTab(t) {
@@ -314,6 +467,7 @@
     const emails = h.emails ? Object.values(h.emails) : [];
     $('hhMembers').textContent = emails.length ? 'משתמשים בתקציב: ' + emails.join(', ') : '';
     $('codeText').textContent = prettyCode(state.hid);
+    renderEncCard();
     $('whoami').textContent = 'מחוברים בתור ' + ((state.user && state.user.email) || '');
   }
   $('copyCode').onclick = async () => {
@@ -323,11 +477,11 @@
     setTimeout(() => { $('copyCode').textContent = 'העתקה'; }, 2000);
   };
   $('renameBtn').onclick = () => openSheet('rename');
-  $('logoutBtn').onclick = () => state.auth && state.auth.signOut();
-  $('sLogout').onclick = () => state.auth && state.auth.signOut();
+  $('logoutBtn').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
+  $('sLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
 
   // ---------- sheet ----------
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
@@ -342,13 +496,24 @@
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = String(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
+    if (mode === 'encpass') {
+      state.sheet.enable = !!obj.enable; state.sheet.reset = !!obj.reset;
+      $('sheetTitle').textContent = obj.enable ? 'הפעלת הצפנה' : 'סיסמה משפחתית חדשה';
+      $('epNote').textContent = obj.enable ? 'בחרו סיסמה שכל המשפחה תזכור. תקלידו אותה פעם אחת בכל טלפון. בשלב הבא תקבלו קוד שחזור.' : obj.reset ? 'נכנסתם עם קוד השחזור. בחרו עכשיו סיסמה משפחתית חדשה.' : 'הסיסמה החדשה תחליף את הקודמת. טלפונים שכבר פתוחים ימשיכו לעבוד.';
+      $('epPass').value = ''; $('epPass2').value = ''; focus = 'epPass';
+    }
+    if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
+    $('saveBtn').textContent = mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
+    $('saveBtn').disabled = mode === 'recovery';
+    $('cancelBtn').hidden = mode === 'recovery';
     $('scrim').hidden = false; $('sheet').hidden = false;
     requestAnimationFrame(() => requestAnimationFrame(() => { $('scrim').classList.add('open'); $('sheet').classList.add('open'); }));
     if (focus) setTimeout(() => $(focus).focus(), 260);
   }
   function closeSheet() {
-    state.sheet = null;
+    if (state.sheet && state.sheet.mode === 'recovery' && !$('recSaved').checked) return;
+    state.sheet = null; $('saveBtn').disabled = false; $('cancelBtn').hidden = false;
     $('scrim').classList.remove('open'); $('sheet').classList.remove('open');
     if (document.activeElement) document.activeElement.blur();
     setTimeout(() => { if (!state.sheet) { $('scrim').hidden = true; $('sheet').hidden = true; } }, 260);
@@ -358,9 +523,21 @@
   $('dIn').onclick = () => setDepositSign(1);
   $('dOut').onclick = () => setDepositSign(-1);
 
-  function submitSheet(e) {
+  async function submitSheet(e) {
     e.preventDefault();
     const s = state.sheet; if (!s) return;
+    if (s.mode === 'recovery') { if ($('recSaved').checked) closeSheet(); return; }
+    if (s.mode === 'encpass') {
+      const p1 = $('epPass').value, p2 = $('epPass2').value;
+      if (p1.length < 6) { sheetError('הסיסמה צריכה לפחות 6 תווים.'); return $('epPass').focus(); }
+      if (p1 !== p2) { sheetError('הסיסמאות לא זהות.'); return $('epPass2').focus(); }
+      $('saveBtn').disabled = true; $('saveBtn').textContent = 'רגע…';
+      try {
+        if (s.enable) { const code = await enableEncryption(p1); state.sheet = null; openSheet('recovery', { code }); decodeAll(); }
+        else { await changeSecret('p', p1); closeSheet(); status('הסיסמה המשפחתית עודכנה.'); setTimeout(() => status(''), 4000); }
+      } catch (err) { sheetError('הפעולה לא הצליחה. בדקו שיש אינטרנט ונסו שוב.'); $('saveBtn').disabled = false; $('saveBtn').textContent = 'שמירה'; }
+      return;
+    }
     const FV = firebase.firestore.FieldValue;
     if (s.mode === 'add' || s.mode === 'edit') {
       const name = $('fName').value.trim(); const amtRaw = $('fAmount').value.trim(); const amount = parseAmount(amtRaw);
@@ -372,19 +549,19 @@
         const order = items.length ? Math.max(...items.map(i => i.order || 0)) + 1 : 1;
         const doc = { month: state.view, name, amount, paid: false, recurring, order };
         if (recurring) doc.seriesId = rid();
-        write(() => itemRef(state.view + '_' + rid()).set(doc));
+        write(async () => itemRef(state.view + '_' + rid()).set(await seal(doc, ['name', 'amount'])));
       } else {
         const it = state.items.find(x => x.id === s.id); if (!it) return closeSheet();
         const patch = { name, amount, recurring };
         if (recurring && !it.seriesId) patch.seriesId = rid();
-        write(() => itemRef(it.id).update(patch));
+        write(async () => itemRef(it.id).update(await seal(patch, ['name', 'amount'], true)));
       }
       return closeSheet();
     }
     if (s.mode === 'income') {
       const raw = $('fIncome').value.trim(); const val = raw === '' ? 0 : parseAmount(raw);
       if (!Number.isFinite(val) || val < 0) return sheetError('ההכנסה צריכה להיות מספר, למשל 15000.');
-      write(() => monthRef(state.view).set({ income: val }, { merge: true }));
+      const mk = state.view; write(async () => monthRef(mk).set(await seal({ income: val }, ['income'], true), { merge: true }));
       return closeSheet();
     }
     if (s.mode === 'goalNew' || s.mode === 'goalEdit') {
@@ -395,10 +572,15 @@
       if (s.mode === 'goalNew') {
         const start = $('gStart').value.trim() ? parseAmount($('gStart').value) : 0;
         if (!Number.isFinite(start) || start < 0) return sheetError('הסכום שכבר נחסך צריך להיות מספר.');
-        const doc = { name, target, deadline, saved: start, createdAt: Date.now(), deposits: start ? [{ id: rid(), amount: start, at: Date.now() }] : [] };
-        write(() => goalRef(rid()).set(doc));
+        const dep = start ? [{ id: rid(), amount: start, at: Date.now() }] : [];
+        write(async () => {
+          const doc = await seal({ name, target, deadline, saved: start, createdAt: Date.now() }, ['name', 'target', 'deadline']);
+          if (doc.e) delete doc.saved;
+          doc.deposits = doc.e ? await Promise.all(dep.map(async x => ({ id: x.id, at: x.at, e: await aesEnc(state.key, te.encode(JSON.stringify({ amount: x.amount }))) }))) : dep;
+          return goalRef(rid()).set(doc);
+        });
       } else {
-        write(() => goalRef(s.id).update({ name, target, deadline }));
+        write(async () => goalRef(s.id).update(await seal({ name, target, deadline }, ['name', 'target', 'deadline'], true)));
       }
       return closeSheet();
     }
@@ -406,7 +588,11 @@
       const a = parseAmount($('dAmount').value);
       if (!$('dAmount').value.trim() || !Number.isFinite(a) || a <= 0) { sheetError('צריך לכתוב סכום, למשל 500.'); return $('dAmount').focus(); }
       const amount = a * state.depositSign;
-      write(() => goalRef(s.id).update({ saved: FV.increment(amount), deposits: FV.arrayUnion({ id: rid(), amount, at: Date.now() }) }));
+      const g = raw.goals.find(x => x.id === s.id) || {};
+      write(async () => {
+        if (g.e && state.key) return goalRef(s.id).update({ deposits: FV.arrayUnion({ id: rid(), at: Date.now(), e: await aesEnc(state.key, te.encode(JSON.stringify({ amount }))) }) });
+        return goalRef(s.id).update({ saved: FV.increment(amount), deposits: FV.arrayUnion({ id: rid(), amount, at: Date.now() }) });
+      });
       return closeSheet();
     }
     if (s.mode === 'rename') {
@@ -444,11 +630,13 @@
     const k = state.view; const src = sourceMonth(k); if (!src) return;
     const have = new Set(monthItems(k).map(i => i.seriesId).filter(Boolean));
     const rec = monthItems(src).filter(i => i.recurring && !have.has(i.seriesId));
-    const batch = state.db.batch();
-    // Same id on both phones, so tapping together still adds each item once.
-    rec.forEach(it => batch.set(itemRef(k + '_' + it.seriesId), { month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0 }));
-    batch.set(monthRef(k), { carried: true }, { merge: true });
-    write(() => batch.commit());
+    write(async () => {
+      const batch = state.db.batch();
+      // Same id on both phones, so tapping together still adds each item once.
+      for (const it of rec) batch.set(itemRef(k + '_' + it.seriesId), await seal({ month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0 }, ['name', 'amount']));
+      batch.set(monthRef(k), { carried: true }, { merge: true });
+      return batch.commit();
+    });
   }
 
   // ---------- month events ----------
@@ -558,9 +746,9 @@
   function stopListening() { state.unsubs.forEach(f => { try { f(); } catch (e) {} }); state.unsubs = []; }
   function openHousehold(hid) {
     stopListening();
-    state.hid = hid; state.loaded = false;
+    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = [];
     try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = [];
-    show('shell'); setTab('vMonth');
+    show('loading');
     const db = state.db; const base = db.collection('households').doc(hid);
     let got = { items: false, months: false };
     const timer = setTimeout(() => { if (!state.loaded) status(state.items.length ? 'אין חיבור כרגע. מוצגים הנתונים האחרונים, ושינויים יישמרו כשהחיבור יחזור.' : 'הנתונים עדיין לא נטענו. בדקו את החיבור לאינטרנט.'); }, 8000);
@@ -570,20 +758,25 @@
       if (e && e.code === 'permission-denied') { stopListening(); state.hid = null; show('setup'); setupError('אין לכם גישה לתקציב הזה יותר. צרו תקציב חדש או הצטרפו עם קוד.'); return; }
       status('החיבור לנתונים נקטע. סגרו ופתחו את האפליקציה.');
     };
-    state.unsubs.push(base.onSnapshot(s => { state.household = s.exists ? s.data() : null; render(); }, onErr));
+    state.unsubs.push(base.onSnapshot(async s => {
+      state.household = s.exists ? s.data() : null;
+      if (isEncrypted() && !state.key && !(await tryStoredKey())) { if (state.screen !== 'unlock') { setUnlockMode('pass'); $('uErr').hidden = true; show('unlock'); } return; }
+      if (state.screen !== 'shell') { show('shell'); setTab('vMonth'); }
+      decodeAll();
+    }, onErr));
     state.unsubs.push(base.collection('items').onSnapshot({ includeMetadataChanges: true }, snap => {
-      state.items = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      raw.items = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
       if (!snap.metadata.fromCache) { got.items = true; ready(); }
-      render();
+      decodeAll();
     }, onErr));
     state.unsubs.push(base.collection('months').onSnapshot({ includeMetadataChanges: true }, snap => {
-      const m = {}; snap.docs.forEach(d => { m[d.id] = d.data(); }); state.months = m;
+      const m = {}; snap.docs.forEach(d => { m[d.id] = d.data(); }); raw.months = m;
       if (!snap.metadata.fromCache) { got.months = true; ready(); }
-      render();
+      decodeAll();
     }, onErr));
     state.unsubs.push(base.collection('goals').onSnapshot(snap => {
-      state.goals = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
-      render();
+      raw.goals = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      decodeAll();
     }, onErr));
   }
 
@@ -606,8 +799,8 @@
   state.auth.getRedirectResult().catch(() => {});
   state.auth.onAuthStateChanged(async (u) => {
     stopListening();
-    state.user = u; state.hid = null; state.household = null;
-    if (!u) { show('auth'); return; }
+    state.user = u; state.hid = null; state.household = null; state.key = null;
+    if (!u) { setAuthMode('login'); $('aPass').value = ''; show('auth'); return; }
     show('loading');
     let hid = null;
     try { const snap = await state.db.collection('users').doc(u.uid).get(); hid = snap.exists ? snap.data().householdId : null; }

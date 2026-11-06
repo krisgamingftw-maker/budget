@@ -270,3 +270,4 @@ button { cursor: pointer; }
 textarea { font: inherit; }
 .btn.google { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; }
 .btn.google svg { width: 20px; height: 20px; }
+.sheet-note { margin: 0; color: var(--muted); font-size: .9rem; }

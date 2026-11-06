@@ -58,6 +58,23 @@
   </div>
 </div>
 
+<!-- Encrypted budget on a new device -->
+<div class="login" id="unlock" hidden>
+  <form class="login-card" id="unlockForm" autocomplete="off">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <h1>התקציב מוצפן</h1>
+    <p class="sub" id="uSub">כדי לפתוח אותו במכשיר הזה, הקלידו את הסיסמה המשפחתית. צריך לעשות את זה רק פעם אחת.</p>
+    <label class="field" id="uPassWrap"><span>סיסמה משפחתית</span><input id="uPass" type="password" autocomplete="off" dir="ltr"></label>
+    <label class="field" id="uCodeWrap" hidden><span>קוד שחזור</span><input id="uCode" class="num" dir="ltr" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" style="text-align:center;letter-spacing:.06em"></label>
+    <p class="sheet-error" id="uErr" hidden></p>
+    <button class="btn" type="submit" id="uBtn">פתיחה</button>
+    <div class="footer-actions">
+      <button type="button" class="link-btn strong" id="uSwitch">שכחתי את הסיסמה, יש לי קוד שחזור</button>
+      <button type="button" class="link-btn" id="uLogout">יציאה מהחשבון</button>
+    </div>
+  </form>
+</div>
+
 <div class="login" id="loading"><p class="sub" style="color:var(--muted)">טוען…</p></div>
 
 <!-- The app -->
@@ -151,6 +168,15 @@
           <div class="code-box"><span class="num" id="codeText">—</span><button class="btn small" id="copyCode">העתקה</button></div>
           <p style="font-size:.8rem">מי שיש לו את הקוד יכול לראות ולערוך את התקציב, אז שתפו אותו רק עם מי שצריך.</p>
         </div>
+        <div class="card" id="encCard">
+          <h2 id="encTitle">הצפנת הנתונים</h2>
+          <p id="encText"></p>
+          <div class="footer-actions" style="justify-content:flex-start">
+            <button class="btn small" id="encOnBtn" hidden>הפעלת הצפנה</button>
+            <button class="btn ghost small" id="encPassBtn" hidden>שינוי סיסמה משפחתית</button>
+            <button class="btn ghost small" id="encCodeBtn" hidden>קוד שחזור חדש</button>
+          </div>
+        </div>
         <div class="card">
           <h2>צבע האפליקציה</h2>
           <div class="palette" role="group" aria-label="צבע האפליקציה" style="justify-content:flex-start">
@@ -211,6 +237,20 @@
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>
+  </div>
+  <div class="sgroup" data-for="encpass" style="display:flex;flex-direction:column;gap:12px">
+    <p class="sheet-note" id="epNote"></p>
+    <label class="field"><span>סיסמה משפחתית (לפחות 6 תווים)</span><input id="epPass" type="password" autocomplete="new-password" dir="ltr"></label>
+    <label class="field"><span>שוב, לאימות</span><input id="epPass2" type="password" autocomplete="new-password" dir="ltr"></label>
+  </div>
+  <div class="sgroup" data-for="recovery" style="display:flex;flex-direction:column;gap:12px">
+    <p class="sheet-note">זה קוד השחזור שלכם. אם תשכחו את הסיסמה המשפחתית, רק הקוד הזה יפתח את הנתונים. שמרו אותו במקום בטוח, למשל במייל או בצילום מסך.</p>
+    <div class="code-box" style="justify-content:center"><span class="num" id="recCode" style="font-size:1.1rem;letter-spacing:.06em;user-select:all">—</span></div>
+    <div class="footer-actions">
+      <button type="button" class="btn small" id="recEmail">שליחה למייל שלי</button>
+      <button type="button" class="btn ghost small" id="recCopy">העתקה</button>
+    </div>
+    <label class="switch-row" style="cursor:pointer"><span class="t"><b>שמרתי את הקוד</b><small>אי אפשר להציג אותו שוב אחר כך</small></span><input type="checkbox" id="recSaved" style="width:24px;height:24px;accent-color:var(--accent)"></label>
   </div>
   <p class="sheet-error" id="sheetError" hidden></p>
   <div class="confirm" id="confirmBox" hidden>

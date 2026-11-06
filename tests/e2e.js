@@ -12,7 +12,7 @@ await p.route(/www\.gstatic\.com\/firebasejs\/.*\/(firebase-[a-z-]+\.js)/,r=>{co
 await p.goto('http://127.0.0.1:8766/');return p;};
 const step=async(p,n)=>{await p.waitForTimeout(700);};
 const A=await mk();
-await A.waitForSelector('#auth:not([hidden])');
+await A.waitForSelector('#auth:not([hidden])');await A.screenshot({path:'../e2e-login.png'});
 await A.click('#aSwitch');await A.fill('#aEmail','kris@test.com');await A.fill('#aPass','secret123');await A.click('#aBtn');
 await A.waitForSelector('#setup:not([hidden])',{timeout:10000});
 await A.fill('#sName','משפחת בדיקה');await A.click('#sCreate');
@@ -48,5 +48,5 @@ await A.click('.tab[data-v=vMonth]');await step(A);console.log('alice sees paid 
 const C=await mk();await C.waitForSelector('#auth:not([hidden])');await C.click('#aSwitch');await C.fill('#aEmail','other@test.com');await C.fill('#aPass','secret123');await C.click('#aBtn');
 await C.waitForSelector('#setup:not([hidden])',{timeout:10000});await C.fill('#sCode','AAAA-BBBB');await C.click('#sJoin');await step(C);console.log('bad code msg:',await C.textContent('#sErr'));
 await A.click('.tab[data-v=vSettings]');await A.click('#logoutBtn');await step(A);console.log('after logout auth visible:',await A.isVisible('#auth'));
-await A.fill('#aEmail','kris@test.com');await A.fill('#aPass','wrong');await A.click('#aBtn');await step(A);console.log('wrong pass:',await A.textContent('#aErr'));
+await A.fill('#aEmail','kris@test.com');await A.fill('#aPass','wrong99');await A.click('#aBtn');await A.waitForTimeout(3000);console.log('mode:',await A.textContent('#aBtn'));console.log('wrong pass:',await A.textContent('#aErr'));
 await b.close();srv.close();});
