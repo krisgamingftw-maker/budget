@@ -245,7 +245,7 @@
   </div>
   <div class="sgroup" data-for="recovery" style="display:flex;flex-direction:column;gap:12px">
     <p class="sheet-note">זה קוד השחזור שלכם. אם תשכחו את הסיסמה המשפחתית, רק הקוד הזה יפתח את הנתונים. שמרו אותו במקום בטוח, למשל במייל או בצילום מסך.</p>
-    <div class="code-box" style="justify-content:center"><span class="num" id="recCode" style="font-size:1.1rem;letter-spacing:.06em;user-select:all">—</span></div>
+    <div class="code-box" style="justify-content:center"><span class="num" id="recCode" style="font-size:1.1rem;letter-spacing:.06em">—</span></div>
     <div class="footer-actions">
       <button type="button" class="btn small" id="recEmail">שליחה למייל שלי</button>
       <button type="button" class="btn ghost small" id="recCopy">העתקה</button>
@@ -272,6 +272,7 @@
 <script>
 // No pinch or double-tap zoom: the app is laid out for phones already.
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
 if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
 </script>

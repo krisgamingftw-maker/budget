@@ -26,6 +26,29 @@
   function shortLabel(k) { const [y, m] = k.split('-').map(Number); return MONTHS_SHORT[m - 1]; }
   function fmt(n) { return (Math.round(n * 100) / 100).toLocaleString('he-IL', { maximumFractionDigits: 2 }) + ' ₪'; }
   function parseAmount(s) { const n = Number(String(s || '').replace(/[,\s₪]/g, '')); return Number.isFinite(n) ? n : NaN; }
+
+  // live thousands separators in amount fields: 4000 -> 4,000
+  function groupNum(v) {
+    let t = String(v || '').replace(/[^\d.]/g, '');
+    const dot = t.indexOf('.');
+    let int = dot >= 0 ? t.slice(0, dot) : t, dec = dot >= 0 ? t.slice(dot + 1).replace(/\./g, '').slice(0, 2) : null;
+    int = int.replace(/^0+(?=\d)/, '');
+    int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return dec === null ? int : (int || '0') + '.' + dec;
+  }
+  ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount'].forEach(id => {
+    const inp = $(id);
+    inp.addEventListener('input', () => {
+      const caret = inp.selectionStart ?? inp.value.length;
+      const before = inp.value.slice(0, caret).replace(/[^\d.]/g, '').length;
+      const out = groupNum(inp.value);
+      if (out === inp.value) return;
+      inp.value = out;
+      let n = 0, pos = 0;
+      while (pos < out.length && n < before) { if (/[\d.]/.test(out[pos])) n++; pos++; }
+      try { inp.setSelectionRange(pos, pos); } catch (e) {}
+    });
+  });
   function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
   function initial(name) { const m = String(name || '').trim().match(/[\p{L}\p{N}]/u); return m ? m[0] : '•'; }
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -306,6 +329,65 @@
     if (state.showPaid) done.forEach(it => pl.append(rowEl(it)));
   }
 
+
+  // ---------- swipe right to delete ----------
+  const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>';
+  const SWIPE_W = 92;
+  let openSwipe = null;
+  function closeSwipe(except) {
+    if (openSwipe && openSwipe !== except) { openSwipe.close(); }
+  }
+  document.addEventListener('pointerdown', e => { if (openSwipe && !openSwipe.outer.contains(e.target)) closeSwipe(); }, true);
+  function swipeable(outer, name, onDelete) {
+    const inner = el('div', 'swipe-in');
+    while (outer.firstChild) inner.append(outer.firstChild);
+    const del = el('button', 'swipe-del'); del.type = 'button';
+    del.innerHTML = TRASH_SVG; const dl = el('span', '', 'מחיקה'); del.append(dl);
+    del.setAttribute('aria-label', 'מחיקת ' + name); del.tabIndex = -1;
+    outer.classList.add('swipeable'); outer.append(del, inner);
+    let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null;
+    const set = (v, anim) => { pos = v; inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
+    const ctl = { outer, close() { set(0, true); disarm(); if (openSwipe === ctl) openSwipe = null; } };
+    function disarm() { armed = false; clearTimeout(armTimer); outer.classList.remove('armed'); dl.textContent = 'מחיקה'; }
+    inner.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      x0 = e.clientX; y0 = e.clientY; base = pos; mode = null; id = e.pointerId;
+    });
+    inner.addEventListener('pointermove', e => {
+      if (e.pointerId !== id) return;
+      const dx = e.clientX - x0, dy = e.clientY - y0;
+      if (!mode) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { mode = 'scroll'; return; }
+        if (Math.abs(dx) > 10) { mode = 'swipe'; closeSwipe(ctl); try { inner.setPointerCapture(id); } catch (err) {} }
+        else return;
+      }
+      if (mode !== 'swipe') return;
+      let v = base + dx;
+      if (v < 0) v = 0;
+      if (v > SWIPE_W) v = SWIPE_W + (v - SWIPE_W) * 0.25;
+      set(v, false);
+    });
+    const end = e => {
+      if (e.pointerId !== id) return; id = null;
+      if (mode !== 'swipe') return;
+      if (pos > SWIPE_W / 2) { set(SWIPE_W, true); openSwipe = ctl; } else ctl.close();
+      // swallow the click that follows the drag
+      const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      inner.addEventListener('click', stop, { capture: true, once: true });
+      setTimeout(() => inner.removeEventListener('click', stop, { capture: true }), 50);
+    };
+    inner.addEventListener('pointerup', end);
+    inner.addEventListener('pointercancel', e => { if (e.pointerId === id && mode === 'swipe') end(e); else id = null; });
+    // a tap on an open row closes it instead of opening the editor
+    inner.addEventListener('click', e => { if (pos > 0) { e.stopPropagation(); e.preventDefault(); ctl.close(); } }, true);
+    del.onclick = () => {
+      if (!armed) { armed = true; outer.classList.add('armed'); dl.textContent = 'בטוח?'; armTimer = setTimeout(disarm, 3000); return; }
+      disarm(); openSwipe = null; outer.classList.add('removing');
+      onDelete();
+    };
+    return outer;
+  }
+
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
@@ -320,7 +402,7 @@
     chk.setAttribute('aria-label', (it.paid ? 'בטל סימון שולם: ' : 'סמן כשולם: ') + it.name);
     chk.onclick = () => togglePaid(it);
     row.append(body, chk);
-    return row;
+    return swipeable(row, it.name, () => write(() => itemRef(it.id).delete()));
   }
 
   // ---------- goals ----------
@@ -379,7 +461,7 @@
         }
         card.append(ul);
       }
-      wrap.append(card);
+      wrap.append(swipeable(card, g.name, () => write(() => goalRef(g.id).delete())));
     }
   }
 
@@ -491,10 +573,10 @@
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
     if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; focus = 'fAmount'; }
-    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = String(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; }
-    if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); const inc = Number((state.months[state.view] || {}).income) || 0; $('fIncome').value = inc ? String(inc) : ''; focus = 'fIncome'; }
+    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; }
+    if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); const inc = Number((state.months[state.view] || {}).income) || 0; $('fIncome').value = inc ? groupNum(inc) : ''; focus = 'fIncome'; }
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
-    if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = String(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
+    if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
     if (mode === 'encpass') {
       state.sheet.enable = !!obj.enable; state.sheet.reset = !!obj.reset;
