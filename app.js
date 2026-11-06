@@ -694,7 +694,6 @@
     catch (e) { btn.textContent = data.url; }
     setTimeout(() => { btn.textContent = label; }, 2500);
   }
-  $('shareAppBtn').onclick = () => shareOrCopy($('shareAppBtn'), { title: 'התקציב', text: 'אפליקציה לניהול תקציב חודשי למשפחה. נכנסים, נרשמים ופותחים תקציב משלכם:', url: APP_URL }, 'שיתוף האפליקציה');
   $('shareCodeBtn').onclick = () => shareOrCopy($('shareCodeBtn'), { title: 'התקציב שלנו', text: 'הצטרפות לתקציב המשותף שלנו: פותחים את הקישור, נרשמים, בוחרים "הצטרפות לתקציב קיים" ומקלידים את הקוד ' + prettyCode(state.hid) + '\n(אם כבר יש לך תקציב: הגדרות ← הצטרפות עם קוד)', url: APP_URL }, 'שליחת הקוד והקישור');
   $('renameBtn').onclick = () => openSheet('rename');
   $('joinOtherBtn').onclick = () => openSheet('joinOther');
