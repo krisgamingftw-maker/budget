@@ -288,7 +288,7 @@ input, textarea, select { -webkit-user-select: text; user-select: text; -webkit-
 img, svg { -webkit-user-drag: none; }
 
 /* savings */
-.field select { padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); width: 100%; font: inherit; font-size: 1rem; appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: 18px 55%, 12px 55%; background-size: 6px 6px; background-repeat: no-repeat; }
+.field select { padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); width: 100%; font: inherit; font-size: 1rem; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393a59d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-position: 14px 50%; background-size: 18px 18px; background-repeat: no-repeat; padding-left: 40px; }
 .field select:focus { border-color: var(--accent); outline: none; }
 .sav-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: .88rem; color: var(--muted); }
 .sav-facts li { display: flex; justify-content: space-between; gap: 10px; }
