@@ -102,7 +102,7 @@ button { cursor: pointer; }
 .btn { border: 0; border-radius: 14px; padding: 12px 18px; font-weight: 600; background: var(--accent); color: var(--on-accent); }
 .btn.small { padding: 9px 14px; font-size: .9rem; align-self: flex-start; }
 .btn.ghost { background: var(--bg); color: var(--ink); }
-.btn.danger-ghost { background: transparent; color: var(--danger); }
+.btn.danger-ghost { background: color-mix(in srgb, var(--danger) 18%, var(--paper)); color: var(--danger); border: 1.5px solid color-mix(in srgb, var(--danger) 45%, transparent); }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn:disabled { opacity: .5; cursor: default; }
 
