@@ -340,7 +340,7 @@
   }
 
 
-  // ---------- swipe right to delete ----------
+  // ---------- swipe left to delete ----------
   const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>';
   const SWIPE_W = 92;
   let openSwipe = null;
@@ -356,7 +356,7 @@
     del.setAttribute('aria-label', 'מחיקת ' + name); del.tabIndex = -1;
     outer.classList.add('swipeable'); outer.append(del, inner);
     let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null, justSwiped = false;
-    const set = (v, anim) => { pos = v; outer.classList.toggle('swiped', v > 0); inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
+    const set = (v, anim) => { pos = v; outer.classList.toggle('swiped', v !== 0); inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
     const ctl = { outer, close() { set(0, true); disarm(); if (openSwipe === ctl) openSwipe = null; } };
     function disarm() { armed = false; clearTimeout(armTimer); outer.classList.remove('armed'); dl.textContent = 'מחיקה'; }
     inner.addEventListener('pointerdown', e => {
@@ -373,14 +373,14 @@
       }
       if (mode !== 'swipe') return;
       let v = base + dx;
-      if (v < 0) v = 0;
-      if (v > SWIPE_W) v = SWIPE_W + (v - SWIPE_W) * 0.25;
+      if (v > 0) v = 0;
+      if (v < -SWIPE_W) v = -SWIPE_W + (v + SWIPE_W) * 0.25;
       set(v, false);
     });
     const end = e => {
       if (e.pointerId !== id) return; id = null;
       if (mode !== 'swipe') return;
-      if (pos > SWIPE_W / 2) { set(SWIPE_W, true); openSwipe = ctl; } else ctl.close();
+      if (pos < -SWIPE_W / 2) { set(-SWIPE_W, true); openSwipe = ctl; } else ctl.close();
       // swallow the click that follows a mouse drag
       justSwiped = true; setTimeout(() => { justSwiped = false; }, 60);
     };
@@ -389,7 +389,7 @@
     // a tap on an open row closes it instead of opening the editor
     inner.addEventListener('click', e => {
       if (justSwiped) { e.stopPropagation(); e.preventDefault(); return; }
-      if (pos > 0) { e.stopPropagation(); e.preventDefault(); ctl.close(); }
+      if (pos !== 0) { e.stopPropagation(); e.preventDefault(); ctl.close(); }
     }, true);
     del.onclick = () => {
       if (!armed) { armed = true; outer.classList.add('armed'); dl.textContent = 'בטוח?'; armTimer = setTimeout(disarm, 3000); return; }

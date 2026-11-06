@@ -22,24 +22,24 @@ await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});awai
 // tap still opens editor
 await p.tap('#openList .row:nth-child(1) .row-body');await w(400);ok(await p.isVisible('#fName'),'tap opens editor');await p.tap('#cancelBtn');await w(400);
 // short swipe snaps back
-await touchSwipe('#openList .row:nth-child(1) .swipe-in',30);ok(!(await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')||'').includes('92'),'short swipe snaps back');
+await touchSwipe('#openList .row:nth-child(1) .swipe-in',-30);ok(!(await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')||'').includes('92'),'short swipe snaps back');
 // left swipe does nothing
-await touchSwipe('#openList .row:nth-child(1) .swipe-in',-150);ok(!(await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')||'').includes('translateX('),'left swipe ignored');
-await touchSwipe('#openList .row:nth-child(1) .swipe-in',150);
-ok((await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')).includes('92'),'swipe right opens');
+await touchSwipe('#openList .row:nth-child(1) .swipe-in',150);ok(!(await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')||'').includes('translateX('),'right swipe ignored');
+await touchSwipe('#openList .row:nth-child(1) .swipe-in',-150);
+ok((await p.locator('#openList .row:nth-child(1) .swipe-in').getAttribute('style')).includes('-92'),'swipe left opens');
 ok(!(await p.isVisible('#fName')),'swipe did not open editor');
 await p.screenshot({path:'../swipe-open.png'});
 await p.tap('#openList .row:nth-child(1) .swipe-del');await w(200);ok((await p.textContent('#openList .row:nth-child(1) .swipe-del')).includes('בטוח'),'first tap asks');
 await p.screenshot({path:'../swipe-armed.png'});
 await p.tap('#openList .row:nth-child(1) .swipe-del');await w(800);ok(await cnt()===2,'row deleted: '+await cnt());
 // tap on open row closes it
-await touchSwipe('#openList .row:nth-child(1) .swipe-in',150);await p.tap('#openList .row:nth-child(1) .row-body');await w(400);
+await touchSwipe('#openList .row:nth-child(1) .swipe-in',-150);await p.tap('#openList .row:nth-child(1) .row-body');await w(400);
 ok(!(await p.isVisible('#fName')),'tap on open row closes it, no editor');ok(await cnt()===2,'nothing deleted');
 // check button still works
 await p.tap('#openList .row:nth-child(1) .check');await w(600);ok(await cnt()===1,'check still works');
 // mouse swipe on goal
 await p.tap('.tab[data-v=vGoals]');await w();await p.tap('#fab');await w(350);await p.fill('#gName','יפן');await p.fill('#gTarget','10000');await p.tap('#saveBtn');await w();
 ok(await p.locator('.goal').count()===1,'goal created');
-await touchSwipe('.goal .swipe-in',150);await p.screenshot({path:'../swipe-goal.png'});
+await touchSwipe('.goal .swipe-in',-150);await p.screenshot({path:'../swipe-goal.png'});
 await p.tap('.goal .swipe-del');await p.tap('.goal .swipe-del');await w(800);ok(await p.locator('.goal').count()===0,'goal deleted');
 console.log(fail?fail+' FAILED':'ALL PASSED');await b.close();srv.close();process.exit(fail?1:0)});

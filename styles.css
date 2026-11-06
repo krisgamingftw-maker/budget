@@ -272,12 +272,12 @@ textarea { font: inherit; }
 .btn.google svg { width: 20px; height: 20px; }
 .sheet-note { margin: 0; color: var(--muted); font-size: .9rem; }
 
-/* swipe right to delete */
+/* swipe left to delete */
 .swipeable { position: relative; overflow: hidden; padding: 0 !important; display: block !important; }
 .swipe-in { position: relative; z-index: 1; background: var(--paper); transition: transform .22s ease; touch-action: pan-y; }
 .row > .swipe-in { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 16px; }
 .goal > .swipe-in { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 22px; }
-.swipe-del { position: absolute; inset-block: 0; left: 0; width: 92px; border: 0; background: var(--danger); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit; font-size: .82rem; font-weight: 700; }
+.swipe-del { position: absolute; inset-block: 0; right: 0; width: 92px; border: 0; background: var(--danger); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit; font-size: .82rem; font-weight: 700; }
 .swipe-del svg { width: 22px; height: 22px; }
 .armed .swipe-del { filter: brightness(.85); }
 .removing { opacity: .4; transition: opacity .2s; }

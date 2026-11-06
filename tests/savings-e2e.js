@@ -47,7 +47,7 @@ await A.click('#fab');await w(400);await A.fill('#svName','חיסכון לילד
 const raw2=JSON.stringify(await q(hp+'/savings'));ok(!raw2.includes('חיסכון לילד'),'new saving encrypted');
 ok((await A.textContent('#savWrap')).includes('133,200'),'total after add');
 // swipe delete with mouse
-await A.locator('#savWrap article:last-of-type').evaluate(e=>e.scrollIntoView({block:'center'}));await w(300);const bb=await A.locator('#savWrap article:last-of-type .swipe-in').boundingBox();await A.mouse.move(bb.x+50,bb.y+40);await A.mouse.down();for(let i=1;i<=10;i++)await A.mouse.move(bb.x+50+15*i,bb.y+40);await A.mouse.up();await w(300);console.log('style after swipe:',await A.locator('#savWrap article:last-of-type .swipe-in').getAttribute('style'), bb);
+await A.locator('#savWrap article:last-of-type').evaluate(e=>e.scrollIntoView({block:'center'}));await w(300);const bb=await A.locator('#savWrap article:last-of-type .swipe-in').boundingBox();await A.mouse.move(bb.x+300,bb.y+40);await A.mouse.down();for(let i=1;i<=10;i++)await A.mouse.move(bb.x+300-15*i,bb.y+40);await A.mouse.up();await w(300);console.log('style after swipe:',await A.locator('#savWrap article:last-of-type .swipe-in').getAttribute('style'), bb);
 await A.click('#savWrap article:last-of-type .swipe-del');await A.click('#savWrap article:last-of-type .swipe-del');await w(800);
 ok(await A.locator('#savWrap article').count()===2,'swipe deleted saving');
 // partner sees savings after unlock
