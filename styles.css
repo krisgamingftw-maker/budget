@@ -325,3 +325,7 @@ img, svg { -webkit-user-drag: none; }
 .row > .swipe-in { padding-inline: 10px 8px; min-height: 56px; }
 .income-btn.over { background: #d63a2f; border: 0; color: #fff; font-weight: 600; }
 .income-btn.over b { font-size: 1.05rem; }
+.head-actions { display: flex; align-items: baseline; gap: 14px; }
+.bulk-btn { border: 0; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: .8rem; padding: 5px 11px; border-radius: 99px; }
+.bulk-btn.armed { background: var(--accent); color: var(--on-accent); }
+.section-head h2 .meta { margin-inline-start: 6px; }

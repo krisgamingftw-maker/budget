@@ -364,6 +364,9 @@
     else open.forEach(it => ol.append(rowEl(it)));
     $('openMeta').textContent = open.length ? (open.length === 1 ? 'פריט אחד' : open.length + ' פריטים') : '';
     $('paidSec').hidden = done.length === 0;
+    const bulkOpen = open.filter(i => !isSplit(i)), bulkDone = done.filter(i => !isSplit(i));
+    $('payAllBtn').hidden = bulkOpen.length < 2; $('unpayAllBtn').hidden = bulkDone.length < 2;
+    if (!bulkArmed) { $('payAllBtn').textContent = 'סימון הכל כשולם'; $('unpayAllBtn').textContent = 'ביטול הכל'; }
     $('togglePaid').textContent = (state.showPaid ? 'הסתרה' : 'הצגה') + ' (' + done.length + ')';
     const pl = $('paidList'); pl.textContent = ''; pl.hidden = !state.showPaid;
     if (state.showPaid) done.forEach(it => pl.append(rowEl(it)));
@@ -937,6 +940,28 @@
   function deleteItem(it) {
     write(async () => { if (it.paid) await linkDeposit(it, false); return itemRef(it.id).delete(); });
   }
+  // Mark (or unmark) every regular line of the month at once. Budgets used in parts follow their purchases.
+  let bulkArmed = null, bulkTimer = null;
+  function bulkPaid(paid) {
+    const btn = $(paid ? 'payAllBtn' : 'unpayAllBtn');
+    if (bulkArmed !== btn) {
+      disarmBulk(); bulkArmed = btn; btn.classList.add('armed'); btn.textContent = 'בטוח? לחצו שוב';
+      bulkTimer = setTimeout(() => { disarmBulk(); render(); }, 3000); return;
+    }
+    disarmBulk();
+    const list = monthItems(state.view).filter(i => !isSplit(i) && !!i.paid !== paid);
+    if (!list.length) return;
+    const ids = new Set(list.map(i => i.id));
+    state.items = state.items.map(x => ids.has(x.id) ? Object.assign({}, x, { paid }) : x);
+    render();
+    write(async () => {
+      const b = state.db.batch(); list.forEach(it => b.update(itemRef(it.id), { paid })); await b.commit();
+      for (const it of list) await linkDeposit(Object.assign({}, it, { paid }), paid);
+    });
+  }
+  function disarmBulk() { clearTimeout(bulkTimer); if (bulkArmed) bulkArmed.classList.remove('armed'); bulkArmed = null; }
+  $('payAllBtn').onclick = () => bulkPaid(true);
+  $('unpayAllBtn').onclick = () => bulkPaid(false);
   function togglePaid(it) {
     const paid = !it.paid;
     state.items = state.items.map(x => x.id === it.id ? Object.assign({}, x, { paid }) : x);
