@@ -338,9 +338,10 @@
     $('ringProg').style.strokeDashoffset = String(RING * (1 - pct / 100));
     if (income) {
       const b = income - total;
-      $('incomeText').textContent = 'הכנסה ' + fmt(income) + (b >= 0 ? ' · יישאר' : ' · חריגה');
-      $('balance').textContent = fmt(Math.abs(b));
-    } else { $('incomeText').textContent = 'הוספת הכנסה חודשית (לא חובה)'; $('balance').textContent = ''; }
+      $('incomeText').textContent = b >= 0 ? 'הכנסה ' + fmt(income) + ' · יישאר' : 'חריגה מההכנסה (' + fmt(income) + ')';
+      $('balance').textContent = (b < 0 ? '−' : '') + fmt(Math.abs(b));
+      $('incomeBtn').classList.toggle('over', b < 0);
+    } else { $('incomeText').textContent = 'הוספת הכנסה חודשית (לא חובה)'; $('balance').textContent = ''; $('incomeBtn').classList.remove('over'); }
 
     const src = sourceMonth(k);
     const mdoc = state.months[k] || {};

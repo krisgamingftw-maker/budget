@@ -103,7 +103,7 @@ button { cursor: pointer; }
 .btn.small { padding: 9px 14px; font-size: .9rem; align-self: flex-start; }
 .btn.ghost { background: var(--bg); color: var(--ink); }
 .btn.danger-ghost { background: color-mix(in srgb, var(--danger) 18%, var(--paper)); color: var(--danger); border: 1.5px solid color-mix(in srgb, var(--danger) 45%, transparent); }
-.btn.danger { background: var(--danger); color: #fff; }
+.btn.danger { background: #d63a2f; color: #fff; }
 .btn:disabled { opacity: .5; cursor: default; }
 
 /* Lists */
@@ -323,3 +323,5 @@ img, svg { -webkit-user-drag: none; }
 /* no initial-letter badges */
 .avatar { display: none !important; }
 .row > .swipe-in { padding-inline: 10px 8px; min-height: 56px; }
+.income-btn.over { background: #d63a2f; border: 0; color: #fff; font-weight: 600; }
+.income-btn.over b { font-size: 1.05rem; }
