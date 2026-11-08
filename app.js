@@ -55,6 +55,8 @@
     { id: 'car', n: 'רכב ותחבורה', e: '🚗' }, { id: 'health', n: 'בריאות וטיפוח', e: '💊' }, { id: 'kids', n: 'ילדים וחיות', e: '🐾' },
     { id: 'fun', n: 'בזבוזים ופנאי', e: '🎉' }, { id: 'save', n: 'חיסכון', e: '🐷' }, { id: 'misc', n: 'שונות', e: '📦' }
   ];
+  const CAT_COLOR = { home: '#f0ad9a', bills: '#f2c66d', food: '#93cdb0', car: '#94bde3', health: '#e9a3c0', kids: '#c3a7e6', fun: '#f19aae', save: '#7fc9bb', misc: '#c9bdb4' };
+  const CAT_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
   const CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
   const CAT_WORDS = [
     ['save', /חיסכון|חסכון|הפקדה|השתלמות|פיקדון|פקדון|גמל/],
@@ -78,18 +80,26 @@
   function show(id) { state.screen = id; ['auth', 'setup', 'unlock', 'loading', 'shell'].forEach(x => { $(x).hidden = x !== id; }); }
   function status(msg) { const e = $('status'); e.textContent = msg || ''; e.hidden = !msg; }
 
-  // ---------- palette ----------
-  function setPalette(p, save) {
-    if (p === 'green') document.documentElement.removeAttribute('data-palette'); else document.documentElement.setAttribute('data-palette', p);
-    document.querySelectorAll('.swatch').forEach(s => s.setAttribute('aria-pressed', s.dataset.p === p ? 'true' : 'false'));
+  // ---------- look: palette + light/dark ----------
+  const PALETTES = ['peach', 'green', 'blue', 'purple', 'teal', 'sun'];
+  const darkQuery = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  let curPalette = 'peach', curTheme = 'auto';
+  function applyLook() {
+    const r = document.documentElement;
+    r.setAttribute('data-palette', curPalette);
+    if (curTheme === 'auto') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', curTheme);
+    document.querySelectorAll('.swatch').forEach(s => s.setAttribute('aria-pressed', s.dataset.p === curPalette ? 'true' : 'false'));
+    document.querySelectorAll('.seg-btn').forEach(s => s.setAttribute('aria-pressed', s.dataset.t === curTheme ? 'true' : 'false'));
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = { green: '#1f7a52', blue: '#2563a8', purple: '#6b47b8', pink: '#c2416f', teal: '#0f7c86' }[p] || '#1f7a52';
-    if (save) { try { localStorage.setItem('budget-palette', p); } catch (e) {} }
+    if (meta) meta.content = getComputedStyle(r).getPropertyValue('--bg').trim() || '#fbf6f2';
   }
-  let savedPalette = 'green';
-  try { savedPalette = localStorage.getItem('budget-palette') || 'green'; } catch (e) {}
-  setPalette(savedPalette, false);
+  function setPalette(p, save) { curPalette = PALETTES.includes(p) ? p : 'peach'; applyLook(); if (save) { try { localStorage.setItem('budget-look-palette', curPalette); } catch (e) {} } }
+  function setTheme(t, save) { curTheme = ['auto', 'light', 'dark'].includes(t) ? t : 'auto'; applyLook(); if (save) { try { localStorage.setItem('budget-look-theme', curTheme); } catch (e) {} } }
+  try { curPalette = localStorage.getItem('budget-look-palette') || 'peach'; curTheme = localStorage.getItem('budget-look-theme') || 'auto'; } catch (e) {}
+  setPalette(curPalette, false); setTheme(curTheme, false);
+  if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener('change', applyLook);
   document.querySelectorAll('.swatch').forEach(s => { s.onclick = () => setPalette(s.dataset.p, true); });
+  document.querySelectorAll('.seg-btn').forEach(s => { s.onclick = () => setTheme(s.dataset.t, true); });
 
   // ---------- data paths ----------
   const hh = () => state.db.collection('households').doc(state.hid);
@@ -344,7 +354,7 @@
   function renderMonth() {
     const k = state.view;
     $('monthTitle').textContent = label(k);
-    $('monthSub').textContent = k === todayKey ? 'החודש הנוכחי' : ((state.household && state.household.name) || '');
+    $('monthSub').textContent = '';
     $('todayWrap').hidden = k === todayKey;
 
     const { items, total, paid, income } = monthStats(k);
@@ -352,17 +362,23 @@
     const pct = total > 0 ? Math.round(paid / total * 100) : 0;
     const allDone = items.length > 0 && left === 0;
     $('remain').textContent = fmt(left);
-    $('remainLabel').textContent = allDone ? 'הכל שולם החודש' : 'נשאר לשלם';
+    $('remainLabel').textContent = allDone ? 'הכל שולם החודש 🎉' : 'נשאר לשלם החודש';
     $('sTotal').textContent = fmt(total);
     $('sPaid').textContent = fmt(paid);
     $('ringPct').textContent = pct + '%';
-    $('ringProg').style.strokeDashoffset = String(RING * (1 - pct / 100));
+    $('pcPaid').style.width = pct + '%';
+    const hr = new Date().getHours();
+    const hello = hr >= 5 && hr < 12 ? 'בוקר טוב' : hr < 17 && hr >= 12 ? 'צהריים טובים' : hr >= 17 && hr < 22 ? 'ערב טוב' : 'לילה טוב';
+    const hn = ((state.household && state.household.name) || '').trim();
+    $('greet').textContent = hello + (hn && hn !== 'התקציב שלנו' ? ', ' + hn : '') + ' 👋';
     if (income) {
       const b = income - total;
-      $('incomeText').textContent = b >= 0 ? 'הכנסה ' + fmt(income) + ' · יישאר אחרי ההוצאות' : 'חריגה מההכנסה (' + fmt(income) + ')';
-      $('balance').textContent = (b < 0 ? '−' : '') + fmt(Math.abs(b));
-      $('incomeBtn').classList.toggle('over', b < 0);
-    } else { $('incomeText').textContent = 'הוספת הכנסה חודשית (לא חובה)'; $('balance').textContent = ''; $('incomeBtn').classList.remove('over'); }
+      $('incomeLbl').textContent = 'הכנסה'; $('incomeAmt').textContent = fmt(income);
+      $('afterChip').hidden = false;
+      $('incomeText').textContent = b >= 0 ? 'יישאר אחרי ההוצאות' : 'חריגה של';
+      $('balance').textContent = fmt(Math.abs(b));
+      $('afterChip').classList.toggle('over', b < 0);
+    } else { $('incomeLbl').textContent = '+ הוספת הכנסה'; $('incomeAmt').textContent = ''; $('afterChip').hidden = true; }
 
     const src = sourceMonth(k);
     const mdoc = state.months[k] || {};
@@ -461,16 +477,13 @@
     for (const i of items) { const c = catOf(i); (by[c] = by[c] || { total: 0, paid: 0, n: 0 }); by[c].total += itemTotal(i); by[c].paid += itemPaid(i); by[c].n++; }
     const ids = CATS.map(c => c.id).filter(id => by[id]).sort((a, b) => by[b].total - by[a].total);
     $('catSec').hidden = ids.length < 2 && !state.catFilter;
-    const max = Math.max(1, ...ids.map(id => by[id].total));
     for (const id of ids) {
       const c = CAT_BY[id], d = by[id];
       const b = el('button', 'cat-row' + (state.catFilter === id ? ' on' : '')); b.type = 'button';
+      b.style.setProperty('--cc', CAT_COLOR[id]);
       b.setAttribute('aria-pressed', state.catFilter === id ? 'true' : 'false');
-      const top = el('span', 'cat-top');
-      top.append(el('span', 'cat-name', c.e + ' ' + c.n), el('b', 'num', fmt(d.total)));
-      const bar = el('span', 'cat-bar'); const f = el('i'); f.style.width = (d.total / max * 100) + '%';
-      const p = el('i', 'paid'); p.style.width = (d.paid / max * 100) + '%'; bar.append(f, p);
-      b.append(top, bar);
+      b.setAttribute('aria-label', c.n + ' ' + fmt(d.total));
+      b.append(el('span', 'cat-ico', c.e), el('b', 'num', fmt(d.total)), el('span', 'cat-name', CAT_SHORT[id] || c.n));
       b.onclick = () => { state.catFilter = state.catFilter === id ? null : id; render(); if (state.catFilter) $('openList').closest('.section').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
       box.append(b);
     }
@@ -479,13 +492,10 @@
     if (state.catFilter) { const c = CAT_BY[state.catFilter]; $('catFilterText').textContent = 'מוצג רק: ' + c.e + ' ' + c.n; }
   }
   $('catClear').onclick = () => { state.catFilter = null; render(); };
-  $('catToggle').onclick = () => { state.catsOpen = !state.catsOpen; try { localStorage.setItem('budget-cats', state.catsOpen ? '1' : '0'); } catch (e) {} applyCatsOpen(); };
-  function applyCatsOpen() { $('catList').hidden = !state.catsOpen; $('catToggle').textContent = state.catsOpen ? 'הסתרה' : 'הצגה'; }
-  try { state.catsOpen = localStorage.getItem('budget-cats') !== '0'; } catch (e) { state.catsOpen = true; }
-  applyCatsOpen();
 
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
+    row.style.setProperty('--cc', CAT_COLOR[catOf(it)]);
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
     const av = el('span', 'avatar', initial(it.name)); av.setAttribute('aria-hidden', 'true');
     const tx = el('span', 'row-text');
@@ -524,6 +534,25 @@
   }
 
   // ---------- goals ----------
+  const GOAL_ICONS = [[/טיול|יפן|חופשה|טיסה|חו"ל|חול|נסיעה/, '✈️'], [/מחשב|לפטופ|טלפון|אייפון|טאבלט/, '💻'], [/יום הולדת|מתנה|הולדת/, '🎁'], [/רכב|אוטו|מכונית/, '🚗'], [/דירה|בית|משכנתא|שיפוץ/, '🏡'], [/חתונה|טבעת/, '💍'], [/לימוד|תואר|קורס/, '🎓'], [/תינוק|לידה|ילד/, '🍼'], [/חירום|ביטחון/, '🛟']];
+  const TILE_TINTS = ['#f6c7b6', '#a9d4bd', '#c9b2e6', '#f3cf86', '#94bde3', '#f19aae'];
+  function goalIcon(name) { for (const [re, e] of GOAL_ICONS) if (re.test(name || '')) return e; return '🎯'; }
+  function savIcon(v) { const t = (v.kind || '') + ' ' + (v.name || ''); return /השתלמות/.test(t) ? '🎓' : /פיקדון|פקדון/.test(t) ? '🔒' : /גמל|פנסי/.test(t) ? '🏦' : /ילד/.test(t) ? '🧸' : /מניות|השקע|תיק/.test(t) ? '📈' : '🌱'; }
+  function tile(emoji, i) { const t = el('span', 'tile', emoji); t.style.setProperty('--tt', TILE_TINTS[i % TILE_TINTS.length]); t.setAttribute('aria-hidden', 'true'); return t; }
+  function summaryCard(label, value, sub, pct) {
+    const c = el('div', 'sum-card');
+    const tx = el('div', 'sum-text');
+    tx.append(el('div', 'k', label), el('div', 'v num', value));
+    if (sub) tx.append(el('div', 's', sub));
+    if (pct != null) {
+      const r = el('div', 'sum-ring'); const p = Math.max(0, Math.min(100, pct));
+      r.style.setProperty('--p', p);
+      r.append(el('span', 'num', p + '%'));
+      c.append(r);
+    }
+    c.prepend(tx);
+    return c;
+  }
   function renderGoals() {
     const wrap = $('goalsWrap'); wrap.textContent = '';
     const goals = state.goals.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -534,18 +563,15 @@
     }
     const totalSaved = goals.reduce((s, g) => s + (Number(g.saved) || 0), 0);
     const totalTarget = goals.reduce((s, g) => s + (Number(g.target) || 0), 0);
-    const tot = el('div', 'goals-total');
-    const l = el('div'); l.append(el('div', 'k', 'נחסך בכל המטרות'), el('div', 'v num', fmt(totalSaved)));
-    tot.append(l, el('div', 'k num', 'מתוך ' + fmt(totalTarget)));
-    wrap.append(tot);
+    wrap.append(summaryCard('נחסך בכל המטרות', fmt(totalSaved), 'מתוך ' + fmt(totalTarget), totalTarget > 0 ? Math.round(totalSaved / totalTarget * 100) : 0));
     const nowIdx = monthIndex(todayKey);
-    for (const g of goals) {
+    goals.forEach((g, gi) => {
       const saved = Number(g.saved) || 0, target = Number(g.target) || 0;
       const pct = target > 0 ? Math.min(100, Math.round(saved / target * 100)) : 0;
       const done = target > 0 && saved >= target;
       const card = el('article', 'goal' + (done ? ' done' : ''));
       const head = el('div', 'goal-head');
-      const av = el('span', 'avatar', initial(g.name)); av.setAttribute('aria-hidden', 'true');
+      const av = tile(goalIcon(g.name), gi);
       const title = el('div', 'goal-title');
       title.append(el('b', '', g.name), el('small', '', g.deadline ? 'יעד: ' + label(g.deadline) : 'בלי תאריך יעד'));
       const edit = el('button', 'goal-edit'); edit.innerHTML = EDIT_SVG; edit.setAttribute('aria-label', 'עריכת ' + g.name);
@@ -580,7 +606,7 @@
         card.append(ul);
       }
       wrap.append(swipeable(card, g.name, () => write(() => goalRef(g.id).delete())));
-    }
+    });
   }
 
 
@@ -607,16 +633,12 @@
     }
     const total = list.reduce((s, v) => s + savEstimate(v), 0);
     const monthlyTotal = list.reduce((s, v) => s + (Number(v.monthly) || 0), 0);
-    const tot = el('div', 'goals-total');
-    const l = el('div'); l.append(el('div', 'k', 'סך כל החסכונות'), el('div', 'v num', fmt(Math.round(total))));
-    tot.append(l);
-    if (monthlyTotal) { const r = el('div', 'k sav-monthly'); r.append('הפקדות קבועות'); r.append(el('b', 'num', fmt(monthlyTotal))); r.append('בכל חודש'); tot.append(r); }
-    wrap.append(tot);
+    wrap.append(summaryCard('סך כל החסכונות', fmt(Math.round(total)), monthlyTotal ? 'הפקדות קבועות: ' + fmt(monthlyTotal) + ' בכל חודש' : '', null));
     const nowIdx = monthIndex(todayKey);
-    for (const v of list) {
+    list.forEach((v, vi) => {
       const card = el('article', 'goal');
       const head = el('div', 'goal-head');
-      const av = el('span', 'avatar', initial(v.name)); av.setAttribute('aria-hidden', 'true');
+      const av = tile(savIcon(v), vi + 1);
       const title = el('div', 'goal-title');
       title.append(el('b', '', v.name), el('small', '', (v.kind || 'חיסכון') + (v.endDate ? ' · משתחרר ב' + label(v.endDate) : '')));
       const edit = el('button', 'goal-edit'); edit.innerHTML = EDIT_SVG; edit.setAttribute('aria-label', 'עריכת ' + v.name);
@@ -642,7 +664,7 @@
       foot.append(upd);
       card.append(head, nums, facts, foot);
       wrap.append(swipeable(card, v.name, () => write(() => savRef(v.id).delete())));
-    }
+    });
   }
 
   // ---------- history ----------

@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="he" dir="rtl" data-palette="peach">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>התקציב</title>
-<meta name="theme-color" content="#1f7a52">
+<meta name="theme-color" content="#fbf6f2">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -83,30 +83,29 @@
 
     <!-- Month -->
     <section id="vMonth" class="view">
-      <header class="topbar">
-        <button class="nav-btn" id="prev" aria-label="החודש הקודם"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
-        <h1><span id="monthTitle">…</span><small id="monthSub"></small></h1>
-        <button class="nav-btn" id="next" aria-label="החודש הבא"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
-      </header>
-      <div style="display:flex;justify-content:center;margin-top:-10px" id="todayWrap" hidden><button class="today-link" id="toToday">חזרה לחודש הנוכחי</button></div>
+      <section class="mhead" aria-label="סיכום החודש">
+        <div class="mhead-top">
+          <button class="nav-btn" id="prev" aria-label="החודש הקודם"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+          <h1><small id="greet"></small><span id="monthTitle">…</span><small id="monthSub"></small></h1>
+          <button class="nav-btn" id="next" aria-label="החודש הבא"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+        </div>
+        <div id="todayWrap" class="today-wrap" hidden><button class="today-link" id="toToday">חזרה לחודש הנוכחי</button></div>
+        <div class="hero-label" id="remainLabel">נשאר לשלם</div>
+        <div class="hero-amount num" id="remain">0 ₪</div>
+        <div class="hero-chips">
+          <button class="hchip" id="incomeBtn"><span id="incomeLbl">הוספת הכנסה</span><b class="num" id="incomeAmt"></b></button>
+          <span class="hchip" id="afterChip" hidden><span id="incomeText">יישאר אחרי ההוצאות</span><b class="num" id="balance"></b></span>
+        </div>
+      </section>
 
-      <div style="display:flex;flex-direction:column;gap:18px;margin-top:12px">
-        <section class="hero" aria-label="סיכום החודש">
-          <div class="hero-top">
-            <div>
-              <div class="hero-label" id="remainLabel">נשאר לשלם</div>
-              <div class="hero-amount num" id="remain">0 ₪</div>
-            </div>
-            <div class="ring" aria-hidden="true">
-              <svg viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="34" fill="none" stroke-width="8"/><circle class="prog" id="ringProg" cx="40" cy="40" r="34" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="213.6"/></svg>
-              <span class="num" id="ringPct">0%</span>
-            </div>
-          </div>
-          <div class="hero-stats">
-            <div class="hero-stat"><div class="k">סה״כ הוצאות</div><div class="v num" id="sTotal">0 ₪</div></div>
-            <div class="hero-stat"><div class="k">שולם</div><div class="v num" id="sPaid">0 ₪</div></div>
-          </div>
-          <button class="income-btn" id="incomeBtn"><span id="incomeText">הוספת הכנסה חודשית (לא חובה)</span><b class="num" id="balance"></b></button>
+      <div style="display:flex;flex-direction:column;gap:18px">
+        <section class="progress-card" aria-label="כמה שולם">
+          <div class="pc-top"><b class="num" id="ringPct">0%</b><span class="pc-bar"><i id="pcPaid"></i></span></div>
+          <div class="pc-legend"><span><i class="dot ok"></i>שולם <b class="num" id="sPaid">0 ₪</b></span><span><i class="dot"></i>סה״כ הוצאות <b class="num" id="sTotal">0 ₪</b></span></div>
+        </section>
+
+        <section class="cat-strip" id="catSec" hidden>
+          <div class="cat-list" id="catList"></div>
         </section>
 
         <div class="notice" id="status" hidden></div>
@@ -130,10 +129,6 @@
           <ul class="list" id="paidList"></ul>
         </section>
 
-        <section class="section" id="catSec" hidden>
-          <div class="section-head"><h2>לפי קטגוריה</h2><button class="toggle-paid" id="catToggle">הסתרה</button></div>
-          <div class="cat-list" id="catList"></div>
-        </section>
       </div>
     </section>
 
@@ -197,13 +192,20 @@
           </div>
         </div>
         <div class="card">
-          <h2>צבע האפליקציה</h2>
+          <h2>מראה</h2>
+          <div class="seg" role="group" aria-label="בהיר או כהה">
+            <button class="seg-btn" data-t="auto">לפי הטלפון</button>
+            <button class="seg-btn" data-t="light">בהיר</button>
+            <button class="seg-btn" data-t="dark">כהה</button>
+          </div>
+          <h2 style="margin-top:4px">צבע</h2>
           <div class="palette" role="group" aria-label="צבע האפליקציה" style="justify-content:flex-start">
+            <button class="swatch" data-p="peach" aria-label="ורוד אפרסק" style="background:linear-gradient(135deg,#f3b9a6,#e59aa6,#c9a3dc)"></button>
             <button class="swatch" data-p="green" aria-label="ירוק" style="background:#1f7a52"></button>
             <button class="swatch" data-p="blue" aria-label="כחול" style="background:#2563a8"></button>
             <button class="swatch" data-p="purple" aria-label="סגול" style="background:#6b47b8"></button>
-            <button class="swatch" data-p="pink" aria-label="ורוד" style="background:#c2416f"></button>
             <button class="swatch" data-p="teal" aria-label="טורקיז" style="background:#0f7c86"></button>
+            <button class="swatch" data-p="sun" aria-label="כתום שמש" style="background:#d9822b"></button>
           </div>
         </div>
         <div class="card">
@@ -215,7 +217,7 @@
     </section>
   </div>
 
-  <button class="fab" id="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span id="fabText">הוצאה חדשה</span></button>
+  <button class="fab" id="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span id="fabText" class="sr">הוצאה חדשה</span></button>
 
   <nav class="tabbar" role="tablist" aria-label="ניווט">
     <button class="tab" role="tab" data-v="vMonth" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>החודש</button>

@@ -15,9 +15,9 @@ const add=async(n,a,cat)=>{await A.click('#fab');await w(350);await A.fill('#fAm
 ok(await add('דירה','4000')==='home','guess home');ok(await add('סופר','2500')==='food','guess food');ok(await add('דלק','310')==='car','guess car');
 ok(await add('חשמל','400')==='bills','guess bills');ok(await add('בתי קפה','300')==='fun','guess fun');ok(await add('משהו','100','fun')==='misc','unknown → misc, overridden to fun');
 ok(!(await A.isHidden('#catSec')),'category section visible');
-const t=await A.textContent('#catList');console.log(t.replace(/\s+/g,' '));ok(t.includes('בזבוזים ופנאי')&&t.includes('400'),'fun total 400');
+const t=await A.textContent('#catList');console.log(t.replace(/\s+/g,' '));ok(t.includes('פנאי')&&t.includes('400'),'fun total 400');
 await A.screenshot({path:'../cats-month.png'});
-await A.click('#catList .cat-row:has-text("בזבוזים")');await w();ok(await A.locator('#openList .row').count()===2,'filter shows 2 fun rows');
+await A.click('#catList .cat-row:has-text("פנאי")');await w();ok(await A.locator('#openList .row').count()===2,'filter shows 2 fun rows');
 await A.click('#fab');await w(350);ok(await A.getAttribute('#fCats [aria-pressed=true]','data-c')==='fun','new item defaults to filtered cat');await A.click('#cancelBtn');await w(400);
 await A.click('#catClear');await w();ok(await A.locator('#openList .row').count()===6,'clear filter');
 // edit category
