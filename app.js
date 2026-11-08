@@ -49,6 +49,26 @@
       try { inp.setSelectionRange(pos, pos); } catch (e) {}
     });
   });
+  // ---------- categories ----------
+  const CATS = [
+    { id: 'home', n: 'בית', e: '🏠' }, { id: 'bills', n: 'חשבונות', e: '💡' }, { id: 'food', n: 'אוכל וסופר', e: '🛒' },
+    { id: 'car', n: 'רכב ותחבורה', e: '🚗' }, { id: 'health', n: 'בריאות וטיפוח', e: '💊' }, { id: 'kids', n: 'ילדים וחיות', e: '🐾' },
+    { id: 'fun', n: 'בזבוזים ופנאי', e: '🎉' }, { id: 'save', n: 'חיסכון', e: '🐷' }, { id: 'misc', n: 'שונות', e: '📦' }
+  ];
+  const CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
+  const CAT_WORDS = [
+    ['save', /חיסכון|חסכון|הפקדה|השתלמות|פיקדון|פקדון|גמל/],
+    ['food', /סופר|מכולת|שוק|אוכל|ירקות|מאפייה|קצב|רמי לוי|שופרסל|ויקטורי|יוחננוף/],
+    ['car', /דלק|רכב|חניה|חנייה|טסט|מוסך|ביטוח רכב|רב.?קו|תחבורה|מונית|אוטובוס|כביש/],
+    ['bills', /חשמל|מים|גז|ארנונה|אינטרנט|טלפון|סלולר|פלאפון|נטפליקס|ספוטיפיי|מנוי|כבלים|yes|hot|בזק|רואה חשבון|ביטוח לאומי|מס/i],
+    ['home', /דירה|שכירות|משכנתא|ועד|בית|ניקיון|רהיט|כלי בית/],
+    ['health', /רופא|קופת|תרופ|בית מרקחת|סופר.?פארם|שיניים|טיפול|קוסמטיק|ציפורניים|מספרה|שיער|כושר|חדר כושר|פילאטיס|יוגה|ביטוח בריאות/],
+    ['kids', /גן|מעון|צהרון|חוג|ילד|תינוק|חיתול|כלב|חתול|וטרינר|אוכל כלבים|אוכל חתולים/],
+    ['fun', /בית קפה|בתי קפה|קפה|מסעד|אוכל בחוץ|וולט|wolt|תן ביס|בילוי|סרט|הופעה|חופשה|טיול|בגדים|קניות|זארה|שופינג|מתנה|אמזון|עלי|shein/i]
+  ];
+  function guessCat(name) { const t = String(name || ''); for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
+  const catOf = (it) => (it && it.cat && CAT_BY[it.cat]) ? it.cat : (it && it.linkType === 'sav' ? 'save' : guessCat(it && it.name));
+
   function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
   function initial(name) { const m = String(name || '').trim().match(/[\p{L}\p{N}]/u); return m ? m[0] : '•'; }
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -76,6 +96,7 @@
   const itemRef = (id) => hh().collection('items').doc(id);
   const monthRef = (k) => hh().collection('months').doc(k);
   const goalRef = (id) => hh().collection('goals').doc(id);
+  const ITEM_SECRET = ['name', 'amount', 'cat'];
   const savRef = (id) => hh().collection('savings').doc(id);
   const SAV_FIELDS = ['name', 'kind', 'balance', 'monthly', 'endDate'];
 
@@ -185,7 +206,7 @@
     for (const d of raw.items) {
       const sp = Array.isArray(d.spends) && d.spends.some(x => !x.e);
       if (d.e && !sp) continue;
-      const body = d.e ? {} : await seal({ name: d.name || '', amount: Number(d.amount) || 0 }, ['name', 'amount'], true);
+      const body = d.e ? {} : await seal({ name: d.name || '', amount: Number(d.amount) || 0, cat: d.cat || null }, ITEM_SECRET, true);
       if (sp) body.spends = await Promise.all(d.spends.map(x => x.e ? x : sealAmount(x)));
       writes.push([itemRef(d.id), body]);
     }
@@ -356,7 +377,9 @@
       $('carryBtn').disabled = state.busy;
     }
 
-    const open = items.filter(i => !i.paid), done = items.filter(i => i.paid);
+    renderCats(items);
+    const shown = state.catFilter ? items.filter(i => catOf(i) === state.catFilter) : items;
+    const open = shown.filter(i => !i.paid), done = shown.filter(i => i.paid);
     const ol = $('openList'); ol.textContent = '';
     if (!state.loaded && !state.items.length) ol.append(el('li', 'empty', 'טוען…'));
     else if (!items.length) ol.append(el('li', 'empty', 'אין עדיין הוצאות ב' + label(k) + '. לחצו על "הוצאה חדשה" למטה.'));
@@ -432,6 +455,35 @@
     return outer;
   }
 
+  function renderCats(items) {
+    const box = $('catList'); box.textContent = '';
+    const by = {};
+    for (const i of items) { const c = catOf(i); (by[c] = by[c] || { total: 0, paid: 0, n: 0 }); by[c].total += itemTotal(i); by[c].paid += itemPaid(i); by[c].n++; }
+    const ids = CATS.map(c => c.id).filter(id => by[id]).sort((a, b) => by[b].total - by[a].total);
+    $('catSec').hidden = ids.length < 2 && !state.catFilter;
+    const max = Math.max(1, ...ids.map(id => by[id].total));
+    for (const id of ids) {
+      const c = CAT_BY[id], d = by[id];
+      const b = el('button', 'cat-row' + (state.catFilter === id ? ' on' : '')); b.type = 'button';
+      b.setAttribute('aria-pressed', state.catFilter === id ? 'true' : 'false');
+      const top = el('span', 'cat-top');
+      top.append(el('span', 'cat-name', c.e + ' ' + c.n), el('b', 'num', fmt(d.total)));
+      const bar = el('span', 'cat-bar'); const f = el('i'); f.style.width = (d.total / max * 100) + '%';
+      const p = el('i', 'paid'); p.style.width = (d.paid / max * 100) + '%'; bar.append(f, p);
+      b.append(top, bar);
+      b.onclick = () => { state.catFilter = state.catFilter === id ? null : id; render(); if (state.catFilter) $('openList').closest('.section').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      box.append(b);
+    }
+    const fl = $('catFilterNote');
+    fl.hidden = !state.catFilter;
+    if (state.catFilter) { const c = CAT_BY[state.catFilter]; $('catFilterText').textContent = 'מוצג רק: ' + c.e + ' ' + c.n; }
+  }
+  $('catClear').onclick = () => { state.catFilter = null; render(); };
+  $('catToggle').onclick = () => { state.catsOpen = !state.catsOpen; try { localStorage.setItem('budget-cats', state.catsOpen ? '1' : '0'); } catch (e) {} applyCatsOpen(); };
+  function applyCatsOpen() { $('catList').hidden = !state.catsOpen; $('catToggle').textContent = state.catsOpen ? 'הסתרה' : 'הצגה'; }
+  try { state.catsOpen = localStorage.getItem('budget-cats') !== '0'; } catch (e) { state.catsOpen = true; }
+  applyCatsOpen();
+
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
@@ -441,20 +493,19 @@
     if (isSplit(it)) {
       const amt = Number(it.amount) || 0, spent = it.spent || 0, rest = amt - spent;
       const sub = el('span', 'row-sub split-sub' + (rest < 0 ? ' over' : ''));
+      const cc = CAT_BY[catOf(it)]; sub.append(cc.e + ' ');
       sub.append(rest >= 0 ? 'נשארו ' : 'חריגה של ', el('b', 'num', fmt(Math.abs(rest))), ' מתוך ' + fmt(amt));
       const bar = el('span', 'split-bar'); const f = el('i'); f.style.width = (amt > 0 ? Math.min(100, spent / amt * 100) : 100) + '%'; bar.append(f);
       tx.append(sub, bar);
       body.append(av, tx, el('span', 'row-amt num', fmt(spent)));
       body.onclick = () => openSheet('spend', it);
     } else {
-      const tgt = linkTarget(it);
-      if (it.recurring || tgt) {
-        const sub = el('span', 'row-sub');
-        if (it.recurring) { sub.innerHTML = REPEAT_SVG; sub.append('קבוע'); }
-        if (tgt) { if (it.recurring) sub.append(' · '); sub.append('הפקדה ל' + tgt.name); }
-        else if (it.recurring) sub.append(' כל חודש');
-        tx.append(sub);
-      }
+      const tgt = linkTarget(it); const c = CAT_BY[catOf(it)];
+      const sub = el('span', 'row-sub');
+      sub.append(el('span', 'cat-tag', c.e + ' ' + c.n));
+      if (it.recurring) { sub.append(' · '); const r = el('span', 'rep'); r.innerHTML = REPEAT_SVG; sub.append(r, 'קבוע'); }
+      if (tgt) sub.append(' · הפקדה ל' + tgt.name);
+      tx.append(sub);
       body.append(av, tx, el('span', 'row-amt num', fmt(Number(it.amount) || 0)));
       body.onclick = () => openSheet('edit', it);
     }
@@ -710,8 +761,8 @@
     $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit');
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
-    if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); focus = 'fAmount'; }
-    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; $('fSplit').checked = !!obj.split; fillLink(obj); }
+    if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); setCat(state.catFilter || null, !state.catFilter); focus = 'fAmount'; }
+    if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; $('fSplit').checked = !!obj.split; fillLink(obj); setCat(catOf(obj), !obj.cat); }
     if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); const inc = Number((state.months[state.view] || {}).income) || 0; $('fIncome').value = inc ? groupNum(inc) : ''; focus = 'fIncome'; }
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
@@ -768,23 +819,23 @@
       const name = $('fName').value.trim(); const amtRaw = $('fAmount').value.trim(); const amount = parseAmount(amtRaw);
       if (!amtRaw || !Number.isFinite(amount) || amount < 0) { sheetError('צריך לכתוב סכום, למשל 350.'); return $('fAmount').focus(); }
       if (!name) { sheetError('צריך לכתוב על מה ההוצאה.'); return $('fName').focus(); }
-      const recurring = $('fRec').checked, split = $('fSplit').checked;
+      const recurring = $('fRec').checked, split = $('fSplit').checked, cat = pickedCat || guessCat(name);
       const lv = split ? '' : $('fLink').value; const linkType = lv ? lv.split(':')[0] : null, linkId = lv ? lv.split(':')[1] : null;
       if (s.mode === 'add') {
         const items = monthItems(state.view);
         const order = items.length ? Math.max(...items.map(i => i.order || 0)) + 1 : 1;
-        const doc = { month: state.view, name, amount, paid: false, recurring, order, split, linkType, linkId };
+        const doc = { month: state.view, name, amount, paid: false, recurring, order, split, linkType, linkId, cat };
         if (recurring) doc.seriesId = rid();
-        write(async () => itemRef(state.view + '_' + rid()).set(await seal(doc, ['name', 'amount'])));
+        write(async () => itemRef(state.view + '_' + rid()).set(await seal(doc, ITEM_SECRET)));
       } else {
         const it = state.items.find(x => x.id === s.id); if (!it) return closeSheet();
-        const patch = { name, amount, recurring, split, linkType, linkId };
+        const patch = { name, amount, recurring, split, linkType, linkId, cat };
         if (recurring && !it.seriesId) patch.seriesId = rid();
         const after = Object.assign({}, it, patch);
         const relink = it.paid && (it.linkId !== linkId || Number(it.amount) !== amount || !!it.split !== split);
         write(async () => {
           if (relink) await linkDeposit(it, false);
-          await itemRef(it.id).update(await seal(patch, ['name', 'amount'], true));
+          await itemRef(it.id).update(await seal(patch, ITEM_SECRET, true));
           if (relink) return linkDeposit(after, true);
         });
       }
@@ -904,6 +955,17 @@
   };
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.sheet) closeSheet(); });
 
+  let pickedCat = null, catAuto = true;
+  function setCat(id, auto) {
+    catAuto = !!auto; pickedCat = id || guessCat($('fName').value);
+    document.querySelectorAll('#fCats button').forEach(b => b.setAttribute('aria-pressed', b.dataset.c === pickedCat ? 'true' : 'false'));
+  }
+  (function buildCatChips() {
+    const box = $('fCats');
+    for (const c of CATS) { const b = el('button', 'chip', c.e + ' ' + c.n); b.type = 'button'; b.dataset.c = c.id; b.onclick = () => setCat(c.id, false); box.append(b); }
+  })();
+  $('fName').addEventListener('input', () => { if (catAuto) setCat(null, true); });
+  $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:')) setCat('save', true); });
   function fillLink(it) {
     const sel = $('fLink'); sel.textContent = '';
     sel.append(new Option('לא, הוצאה רגילה', ''));
@@ -973,14 +1035,14 @@
       if (existing) {
         if (Number(existing.amount) === monthly) return;
         if (existing.paid) await linkDeposit(existing, false);
-        await itemRef(existing.id).update(await seal({ name: existing.name, amount: monthly }, ['name', 'amount'], true));
+        await itemRef(existing.id).update(await seal({ name: existing.name, amount: monthly, cat: catOf(existing) }, ITEM_SECRET, true));
         if (existing.paid) await linkDeposit(Object.assign({}, existing, { amount: monthly }), true);
         return;
       }
       const items = monthItems(k);
       const order = items.length ? Math.max(...items.map(i => i.order || 0)) + 1 : 1;
-      const doc = { month: k, name: 'הפקדה ל' + name, amount: monthly, paid: false, recurring: true, seriesId: rid(), order, split: false, linkType: 'sav', linkId: savId };
-      return itemRef(k + '_' + rid()).set(await seal(doc, ['name', 'amount']));
+      const doc = { month: k, name: 'הפקדה ל' + name, amount: monthly, paid: false, recurring: true, seriesId: rid(), order, split: false, linkType: 'sav', linkId: savId, cat: 'save' };
+      return itemRef(k + '_' + rid()).set(await seal(doc, ITEM_SECRET));
     }
     if (existing && !existing.paid) return itemRef(existing.id).delete();
   }
@@ -1022,14 +1084,14 @@
     write(async () => {
       const batch = state.db.batch();
       // Same id on both phones, so tapping together still adds each item once.
-      for (const it of rec) batch.set(itemRef(k + '_' + it.seriesId), await seal({ month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0, split: !!it.split, linkType: it.linkType || null, linkId: it.linkId || null }, ['name', 'amount']));
+      for (const it of rec) batch.set(itemRef(k + '_' + it.seriesId), await seal({ month: k, name: it.name, amount: Number(it.amount) || 0, paid: false, recurring: true, seriesId: it.seriesId, order: it.order || 0, split: !!it.split, linkType: it.linkType || null, linkId: it.linkId || null, cat: catOf(it) }, ITEM_SECRET));
       batch.set(monthRef(k), { carried: true }, { merge: true });
       return batch.commit();
     });
   }
 
   // ---------- month events ----------
-  function go(k) { state.view = k; render(); }
+  function go(k) { state.view = k; state.catFilter = null; render(); }
   $('prev').onclick = () => go(shiftKey(state.view, -1));
   $('next').onclick = () => go(shiftKey(state.view, 1));
   $('toToday').onclick = () => go(todayKey);
