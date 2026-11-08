@@ -1016,15 +1016,26 @@
   function parseScan(text) {
     const out = [];
     for (let line of String(text || '').split(/\n+/)) {
-      line = line.replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/₪|ש"ח|ש״ח|\bשח\b|nis/gi, ' ').trim();
+      line = line.replace(/[\u200e\u200f\u202a-\u202e]/g, '');
+      line = line.replace(/₪|ש"ח|ש״ח|\bשח\b|nis/gi, ' ').trim();
       if (!line) continue;
       if (/^(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)\s*\d{4}$|^\d{4}\s*(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)$/.test(line)) continue; // a month title
-      const noDates = line.replace(/\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b/g, ' ').replace(/\b\d{1,2}:\d{2}\b/g, ' ');
+      const MONTHS_RE = '(?:ינו(?:אר)?|פבר(?:ואר)?|מרץ|מרס|אפר(?:יל)?|מאי|יוני?|יולי?|אוג(?:וסט)?|ספט(?:מבר)?|אוק(?:טובר)?|נוב(?:מבר)?|דצמ(?:בר)?|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z׳\']*';
+      const noDates = line
+        .replace(/\d{1,4}\s*[./\-]\s*\d{1,2}\s*[./\-]\s*\d{1,4}/g, ' ')            // 08/11/2026, 2026-11-08, 8 . 11 . 26
+        .replace(/(^|[^\d,.])(\d{1,2})\s*([./])\s*(\d{1,2})(?![\d,])/g, (m, p, d, sep, mo) => // 08/11, 8.11 (but not a price like 12.50 alone)
+          (Number(d) >= 1 && Number(d) <= 31 && Number(mo) >= 1 && Number(mo) <= 12 && (sep === '/' || (line.match(/\d+/g) || []).length > 2)) ? p + ' ' : m)
+        .replace(new RegExp('\\d{1,2}\\s*(?:ב|ל)?' + MONTHS_RE + '(?:\\s*\\d{2,4})?', 'gi'), ' ') // 8 בנובמבר 2026
+        .replace(new RegExp(MONTHS_RE + '\\s*\\d{2,4}', 'gi'), ' ')                // נובמבר 2026
+        .replace(/\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?/g, ' ')                     // 14:29
+        .replace(/(^|\D)(?:19|20)\d{2}(?=\D|$)/g, (m, p) => p + ' ')               // a lone year
+        .replace(/\*+\s*\d{4}|\d{4}\s*\*+/g, ' ');                                  // card digits ****1234
       const nums = noDates.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g);
       if (!nums) continue;
       const cand = nums.map(n => ({ n, v: Number(n.replace(/,/g, '')) })).filter(x => x.v > 0 && x.v < 1000000);
       if (!cand.length) continue;
-      const best = cand.reduce((a, b) => (b.v > a.v ? b : a));
+      const score = (x) => (/[.,]/.test(x.n) ? 2 : 0) + (x.v >= 1 ? 1 : 0);
+      const best = cand.reduce((a, b) => (score(b) > score(a) || (score(b) === score(a) && b.v > a.v) ? b : a));
       const amount = best.v;
       // Keep other numbers in the name (like "3 months"), drop the amount and stray symbols such as ✅.
       const i = noDates.lastIndexOf(best.n);
