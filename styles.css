@@ -120,7 +120,7 @@ button { cursor: pointer; }
 
 /* Floating add button */
 .fab { position: fixed; z-index: 20; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); height: 56px; padding: 0 24px 0 20px; border-radius: 99px; border: 0; background: var(--ink); color: var(--bg); font-weight: 600; font-size: 1rem; display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
-.fab svg { width: 20px; height: 20px; }
+.fab svg { width: 18px; height: 18px; }
 .fab:disabled { opacity: .5; }
 
 /* Bottom sheet */
@@ -401,8 +401,8 @@ img, svg { -webkit-user-drag: none; }
 .toggle-paid { color: var(--accent); }
 
 /* round + button over the tab bar */
-.fab { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); left: max(20px, calc(50% - 240px)); transform: none; width: 52px; height: 52px; padding: 0; justify-content: center; border-radius: 18px; background: linear-gradient(150deg, var(--fab1), var(--fab2)); color: #fff; border: 0; box-shadow: 0 8px 20px color-mix(in srgb, var(--fab2) 40%, transparent); }
-.fab svg { width: 22px; height: 22px; }
+.fab { bottom: calc(82px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); width: auto; height: 44px; padding: 0 18px 0 16px; gap: 6px; justify-content: center; border-radius: 99px; font-size: .92rem; font-weight: 700; white-space: nowrap; background: linear-gradient(150deg, var(--fab1), var(--fab2)); color: #fff; border: 0; box-shadow: 0 8px 20px color-mix(in srgb, var(--fab2) 40%, transparent); }
+.fab svg { width: 18px; height: 18px; }
 
 /* floating dark tab bar */
 .tabbar { left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); max-width: 500px; margin: 0 auto; border: 0; border-radius: 24px; background: var(--nav-bg); padding: 8px 4px; box-shadow: 0 12px 30px rgba(30,20,15,.25); }
