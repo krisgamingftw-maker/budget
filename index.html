@@ -232,6 +232,8 @@
   <div class="grab" aria-hidden="true"></div>
   <h3 id="sheetTitle"></h3>
   <div class="sgroup" data-for="item" style="display:flex;flex-direction:column;gap:12px">
+    <button type="button" class="scan-btn" id="scanBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg><span><b>סריקת הוצאות מתמונה</b><small>צילום מסך של רשימה או תמונה מהמצלמה</small></span></button>
+    <input type="file" id="scanFile" accept="image/*" hidden>
     <label class="field"><span>סכום ₪</span><input id="fAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
     <label class="field"><span>על מה</span><input id="fName" placeholder="למשל: חשמל" maxlength="80"></label>
     <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div></div>
@@ -283,6 +285,15 @@
   <div class="sgroup" data-for="joinother" style="display:flex;flex-direction:column;gap:12px">
     <p class="sheet-note" id="joNote"></p>
     <label class="field"><span>הקוד של התקציב המשותף</span><input id="joCode" class="num" dir="ltr" autocomplete="off" autocapitalize="characters" placeholder="ABCD-2345" maxlength="9" style="text-align:center;letter-spacing:.12em;font-size:1.2rem"></label>
+  </div>
+  <div class="sgroup" data-for="scan" style="display:flex;flex-direction:column;gap:12px">
+    <div class="scan-status" id="scanStatus"><span id="scanStatusText">קורא את התמונה…</span><span class="scan-prog"><i id="scanProg"></i></span></div>
+    <p class="sheet-note" id="scanNote" hidden></p>
+    <ul class="scan-list" id="scanList"></ul>
+    <div class="switch-row" id="scanRecRow" hidden>
+      <div class="t"><b>להוסיף כהוצאות קבועות</b><small>יעברו לחודש הבא בלחיצה</small></div>
+      <label class="switch"><input type="checkbox" id="scanRec" aria-label="הוצאות קבועות"><i></i></label>
+    </div>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>

@@ -752,7 +752,7 @@
   $('sLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
 
   // ---------- sheet ----------
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
@@ -767,6 +767,8 @@
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
+    if (mode === 'scan') { $('sheetTitle').textContent = 'סריקת הוצאות'; }
+    $('scanBtn').hidden = mode !== 'add';
     if (mode === 'joinOther') { $('sheetTitle').textContent = 'הצטרפות לתקציב משותף'; $('joCode').value = ''; $('joNote').textContent = 'התקציב הנוכחי שלכם לא נמחק. אם תרצו לחזור אליו, הקוד שלו הוא ' + prettyCode(state.hid) + '. כדאי לשמור אותו.'; focus = 'joCode'; }
     if (mode === 'spend') { $('sheetTitle').textContent = obj.name; $('spAmount').value = ''; renderSpendSheet(obj); focus = 'spAmount'; }
     if (mode === 'savNew') { $('sheetTitle').textContent = 'חיסכון חדש'; $('svName').value = ''; $('svKind').value = 'קרן השתלמות'; $('svBalance').value = ''; $('svMonthly').value = ''; $('svEnd').value = ''; focus = 'svName'; }
@@ -780,7 +782,7 @@
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
-    $('saveBtn').textContent = mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
+    $('saveBtn').textContent = mode === 'scan' ? 'הוספה' : mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
     $('cancelBtn').hidden = mode === 'recovery';
     $('scrim').hidden = false; $('sheet').hidden = false;
@@ -788,6 +790,7 @@
     if (focus) setTimeout(() => $(focus).focus(), 260);
   }
   function closeSheet() {
+    if (state.sheet && state.sheet.mode === 'scan') scanToken++;
     if (state.sheet && state.sheet.mode === 'recovery' && !$('recSaved').checked) return;
     state.sheet = null; $('saveBtn').disabled = false; $('cancelBtn').hidden = false;
     $('scrim').classList.remove('open'); $('sheet').classList.remove('open');
@@ -839,6 +842,25 @@
           if (relink) return linkDeposit(after, true);
         });
       }
+      return closeSheet();
+    }
+    if (s.mode === 'scan') {
+      const rows = [...$('scanList').querySelectorAll('li')].filter(li => li.querySelector('input[type=checkbox]').checked)
+        .map(li => ({ name: li.querySelector('.nm').value.trim(), amount: parseAmount(li.querySelector('.amt').value) }))
+        .filter(r => r.name && Number.isFinite(r.amount) && r.amount > 0);
+      if (!rows.length) return sheetError('לא נבחרו הוצאות להוספה.');
+      const recurring = $('scanRec').checked, k = state.view;
+      const items = monthItems(k); let order = items.length ? Math.max(...items.map(i => i.order || 0)) : 0;
+      write(async () => {
+        const b = state.db.batch();
+        for (const r of rows) {
+          const doc = { month: k, name: r.name, amount: r.amount, paid: false, recurring, order: ++order, split: false, linkType: null, linkId: null, cat: guessCat(r.name) };
+          if (recurring) doc.seriesId = rid();
+          b.set(itemRef(k + '_' + rid()), await seal(doc, ITEM_SECRET));
+        }
+        return b.commit();
+      });
+      scanToken++;
       return closeSheet();
     }
     if (s.mode === 'joinOther') {
@@ -966,6 +988,107 @@
   })();
   $('fName').addEventListener('input', () => { if (catAuto) setCat(null, true); });
   $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:')) setCat('save', true); });
+  // ---------- scan expenses from a picture (runs on the phone, nothing is uploaded) ----------
+  let scanToken = 0, tessLoading = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (!tessLoading) tessLoading = new Promise((res, rej) => {
+      const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js';
+      sc.onload = () => res(window.Tesseract); sc.onerror = () => { tessLoading = null; rej(new Error('load')); }; document.head.append(sc);
+    });
+    return tessLoading;
+  }
+  async function prepImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const scale = Math.min(3, Math.max(1, 1600 / img.naturalWidth));
+      const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
+      const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cv.width, cv.height);
+      const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data; let sum = 0;
+      for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; sum += g; }
+      if (sum / (p.length / 4) < 128) for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } // dark mode screenshot
+      cx.putImageData(d, 0, 0);
+      return cv;
+    } finally { URL.revokeObjectURL(url); }
+  }
+  // Turn recognised text into {name, amount} lines.
+  function parseScan(text) {
+    const out = [];
+    for (let line of String(text || '').split(/\n+/)) {
+      line = line.replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/₪|ש"ח|ש״ח|\bשח\b|nis/gi, ' ').trim();
+      if (!line) continue;
+      if (/^(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)\s*\d{4}$|^\d{4}\s*(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)$/.test(line)) continue; // a month title
+      const noDates = line.replace(/\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b/g, ' ').replace(/\b\d{1,2}:\d{2}\b/g, ' ');
+      const nums = noDates.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g);
+      if (!nums) continue;
+      const cand = nums.map(n => ({ n, v: Number(n.replace(/,/g, '')) })).filter(x => x.v > 0 && x.v < 1000000);
+      if (!cand.length) continue;
+      const best = cand.reduce((a, b) => (b.v > a.v ? b : a));
+      const amount = best.v;
+      // Keep other numbers in the name (like "3 months"), drop the amount and stray symbols such as ✅.
+      const i = noDates.lastIndexOf(best.n);
+      const name = (noDates.slice(0, i) + ' ' + noDates.slice(i + best.n.length))
+        .replace(/[^\u0590-\u05FFA-Za-z0-9\s'"״׳-]/g, ' ').replace(/(^|\s)[-'"]+(?=\s|$)/g, ' ')
+        .replace(/\s+/g, ' ').trim().replace(/^\d\s+|\s+\d$/g, '').trim(); // a lone digit at the edge is usually a misread icon
+      const letters = (w) => (w.match(/[\u0590-\u05FFA-Za-z]/g) || []).length;
+      const words = name.split(' ').filter(Boolean);
+      if (!(words.some(w => letters(w) >= 3) || (words.length === 1 && letters(words[0]) >= 2))) continue; // skips status-bar noise
+      const total = /סה\s*["״']?\s*כ|סך\s*ה?כו?ל|total|יתרה/i.test(noDates);
+      out.push({ name, amount, on: !total });
+    }
+    return out;
+  }
+  function renderScanRows(rows) {
+    const ul = $('scanList'); ul.textContent = '';
+    for (const r of rows) {
+      const li = el('li', r.on ? '' : 'off');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = r.on; cb.setAttribute('aria-label', 'להוסיף את ' + r.name);
+      cb.onchange = () => { li.classList.toggle('off', !cb.checked); updateScanCount(); };
+      const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'nm'; nm.value = r.name; nm.maxLength = 80;
+      const am = document.createElement('input'); am.type = 'text'; am.className = 'amt num'; am.inputMode = 'decimal'; am.value = groupNum(r.amount);
+      am.addEventListener('input', () => { am.value = groupNum(am.value); });
+      li.append(cb, nm, am); ul.append(li);
+    }
+    updateScanCount();
+  }
+  function updateScanCount() {
+    const n = [...$('scanList').querySelectorAll('input[type=checkbox]')].filter(c => c.checked).length;
+    $('saveBtn').textContent = n ? 'הוספת ' + (n === 1 ? 'הוצאה אחת' : n + ' הוצאות') : 'הוספה';
+    $('saveBtn').disabled = !n;
+  }
+  $('scanBtn').onclick = () => { $('scanFile').value = ''; $('scanFile').click(); };
+  $('scanFile').onchange = async () => {
+    const file = $('scanFile').files && $('scanFile').files[0]; if (!file) return;
+    const token = ++scanToken;
+    openSheet('scan');
+    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
+    $('scanStatus').hidden = false; $('scanStatusText').textContent = 'טוען את כלי הסריקה…'; $('scanProg').style.width = '5%';
+    $('saveBtn').disabled = true;
+    let worker = null;
+    try {
+      const T = await loadTesseract();
+      const canvas = await prepImage(file);
+      if (token !== scanToken) return;
+      worker = await T.createWorker('heb', 1, { logger: m => {
+        if (token !== scanToken) return;
+        if (m.status === 'recognizing text') { $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * 80) + '%'; }
+        else if (/load|initializ/.test(m.status || '')) { $('scanStatusText').textContent = 'מכין את הסריקה…'; $('scanProg').style.width = (5 + (m.progress || 0) * 15) + '%'; }
+      } });
+      const { data } = await worker.recognize(canvas);
+      if (token !== scanToken) return;
+      const rows = parseScan(data && data.text);
+      $('scanStatus').hidden = true;
+      if (!rows.length) { $('scanNote').hidden = false; $('scanNote').textContent = 'לא מצאתי בתמונה שורות עם שם וסכום. נסו צילום מסך חד יותר, או תמונה שבה כל הוצאה בשורה משלה.'; return; }
+      $('scanNote').hidden = false; $('scanNote').textContent = 'מצאתי ' + rows.length + ' שורות. בדקו ותקנו שמות וסכומים, והורידו את הסימון ממה שלא צריך.';
+      $('scanRecRow').hidden = false;
+      renderScanRows(rows);
+    } catch (err) {
+      if (token !== scanToken) return;
+      $('scanStatus').hidden = true; $('scanNote').hidden = false;
+      $('scanNote').textContent = navigator.onLine === false ? 'צריך חיבור לאינטרנט בפעם הראשונה כדי לטעון את כלי הסריקה.' : 'הסריקה לא הצליחה. נסו שוב או תמונה אחרת.';
+    } finally { if (worker) worker.terminate().catch(() => {}); }
+  };
   function fillLink(it) {
     const sel = $('fLink'); sel.textContent = '';
     sel.append(new Option('לא, הוצאה רגילה', ''));
