@@ -256,7 +256,15 @@
     <button type="button" class="link-btn" id="spEdit" style="align-self:flex-start">עריכת שם וסכום התקציב</button>
   </div>
   <div class="sgroup" data-for="income">
-    <label class="field"><span>הכנסה בחודש הזה ₪</span><input id="fIncome" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <div style="display:flex;flex-direction:column;gap:12px">
+    <label class="field"><span id="fIncomeLbl">הכנסה בחודש הזה ₪</span><input id="fIncome" class="num amount-input" inputmode="decimal" placeholder="0"></label>
+    <label class="switch-row"><span class="t"><b>יש עוד הכנסות</b><small>למשל משכורת של בן הזוג, קצבה או עבודה נוספת</small></span><span class="switch"><input type="checkbox" id="fMoreInc"><i></i></span></label>
+    <div id="incExtraWrap" class="inc-extra" hidden>
+      <ul class="inc-list" id="incList"></ul>
+      <button type="button" class="btn ghost small" id="incAdd">+ עוד הכנסה</button>
+      <div class="inc-total"><span>סה״כ הכנסה בחודש</span><b class="num" id="incTotal">0 ₪</b></div>
+    </div>
+    </div>
   </div>
   <div class="sgroup" data-for="goal" style="display:flex;flex-direction:column;gap:12px">
     <label class="field"><span>שם המטרה</span><input id="gName" placeholder="למשל: טיול ליוון" maxlength="60"></label>

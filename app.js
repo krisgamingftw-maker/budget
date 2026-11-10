@@ -36,8 +36,7 @@
     int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return dec === null ? int : (int || '0') + '.' + dec;
   }
-  ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount', 'svBalance', 'svMonthly', 'sbAmount', 'spAmount'].forEach(id => {
-    const inp = $(id);
+  function liveCommas(inp) {
     inp.addEventListener('input', () => {
       const caret = inp.selectionStart ?? inp.value.length;
       const before = inp.value.slice(0, caret).replace(/[^\d.]/g, '').length;
@@ -48,7 +47,8 @@
       while (pos < out.length && n < before) { if (/[\d.]/.test(out[pos])) n++; pos++; }
       try { inp.setSelectionRange(pos, pos); } catch (e) {}
     });
-  });
+  }
+  ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount', 'svBalance', 'svMonthly', 'sbAmount', 'spAmount'].forEach(id => liveCommas($(id)));
   // ---------- categories ----------
   const CATS = [
     { id: 'home', n: 'בית', e: '🏠' }, { id: 'bills', n: 'חשבונות', e: '💡' }, { id: 'food', n: 'אוכל וסופר', e: '🛒' },
@@ -220,7 +220,7 @@
       if (sp) body.spends = await Promise.all(d.spends.map(x => x.e ? x : sealAmount(x)));
       writes.push([itemRef(d.id), body]);
     }
-    for (const k of Object.keys(raw.months)) { const m = raw.months[k]; if (!m.e && m.income != null) writes.push([monthRef(k), await seal({ income: Number(m.income) || 0 }, ['income'], true)]); }
+    for (const k of Object.keys(raw.months)) { const m = raw.months[k]; if (!m.e && m.income != null) writes.push([monthRef(k), await seal(incomeDoc(m), INCOME_SECRET, true)]); }
     for (const g of raw.goals) {
       if (g.e) continue;
       const body = await seal({ name: g.name || '', target: Number(g.target) || 0, deadline: g.deadline || null }, ['name', 'target', 'deadline'], true);
@@ -373,7 +373,7 @@
     $('greet').textContent = hello + (hn && hn !== 'התקציב שלנו' ? ', ' + hn : '') + ' 👋';
     if (income) {
       const b = income - total;
-      $('incomeLbl').textContent = 'הכנסה'; $('incomeAmt').textContent = fmt(income);
+      $('incomeLbl').textContent = ((state.months[k] || {}).extras || []).length ? 'הכנסות' : 'הכנסה'; $('incomeAmt').textContent = fmt(income);
       $('afterChip').hidden = false;
       $('incomeText').textContent = b >= 0 ? 'יישאר אחרי ההוצאות' : 'חריגה של';
       $('balance').textContent = fmt(Math.abs(b));
@@ -774,6 +774,46 @@
   $('sLogout').onclick = () => { forgetKeys(); state.key = null; decCache.clear(); state.auth && state.auth.signOut(); };
 
   // ---------- sheet ----------
+  // Income: a main amount plus optional extra lines; `income` keeps the total so every other screen just reads it.
+  const INCOME_SECRET = ['income', 'incomeMain', 'extras'];
+  function incomeDoc(m) {
+    const extras = (Array.isArray(m.extras) ? m.extras : []).map(x => ({ name: String(x.name || ''), amount: Number(x.amount) || 0 }));
+    const main = m.incomeMain != null ? Number(m.incomeMain) || 0 : Number(m.income) || 0;
+    return { income: main + extras.reduce((t, x) => t + x.amount, 0), incomeMain: main, extras };
+  }
+  function incRow(x) {
+    const li = el('li', 'inc-row');
+    const n = el('input', 'inc-name'); n.placeholder = 'שם, למשל: משכורת 2'; n.maxLength = 40; n.value = (x && x.name) || '';
+    const a = el('input', 'inc-amt num'); a.inputMode = 'decimal'; a.placeholder = '0'; a.value = x && x.amount ? groupNum(x.amount) : '';
+    liveCommas(a); a.addEventListener('input', updIncTotal);
+    const del = el('button', 'sp-del', '×'); del.type = 'button'; del.setAttribute('aria-label', 'הסרת ההכנסה');
+    del.onclick = () => { li.remove(); if (!$('incList').children.length) $('incList').append(incRow()); updIncTotal(); };
+    li.append(n, a, del); return li;
+  }
+  function updIncTotal() {
+    let t = parseAmount($('fIncome').value) || 0;
+    if ($('fMoreInc').checked) for (const i of $('incList').querySelectorAll('.inc-amt')) t += parseAmount(i.value) || 0;
+    $('incTotal').textContent = fmt(t);
+  }
+  function syncMoreInc() {
+    const on = $('fMoreInc').checked;
+    $('incExtraWrap').hidden = !on;
+    $('fIncomeLbl').textContent = on ? 'הכנסה ראשית ₪' : 'הכנסה בחודש הזה ₪';
+    if (on && !$('incList').children.length) $('incList').append(incRow());
+    updIncTotal();
+  }
+  function fillIncomeSheet(m) {
+    const d = incomeDoc(m);
+    $('fIncome').value = d.incomeMain ? groupNum(d.incomeMain) : '';
+    $('incList').textContent = '';
+    d.extras.forEach(x => $('incList').append(incRow(x)));
+    $('fMoreInc').checked = d.extras.length > 0;
+    syncMoreInc();
+  }
+  $('fMoreInc').onchange = () => { syncMoreInc(); if ($('fMoreInc').checked) { const f = $('incList').querySelector('.inc-name'); if (f && !f.value) f.focus(); } };
+  $('incAdd').onclick = () => { const li = incRow(); $('incList').append(li); li.querySelector('.inc-name').focus(); };
+  $('fIncome').addEventListener('input', updIncTotal);
+
   const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
@@ -785,7 +825,7 @@
     let focus = null;
     if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); setCat(state.catFilter || null, !state.catFilter); focus = 'fAmount'; }
     if (mode === 'edit') { $('sheetTitle').textContent = 'עריכת הוצאה'; $('fName').value = obj.name; $('fAmount').value = groupNum(obj.amount ?? ''); $('fRec').checked = !!obj.recurring; $('fSplit').checked = !!obj.split; fillLink(obj); setCat(catOf(obj), !obj.cat); }
-    if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); const inc = Number((state.months[state.view] || {}).income) || 0; $('fIncome').value = inc ? groupNum(inc) : ''; focus = 'fIncome'; }
+    if (mode === 'income') { $('sheetTitle').textContent = 'הכנסה ב' + label(state.view); fillIncomeSheet(state.months[state.view] || {}); focus = 'fIncome'; }
     if (mode === 'goalNew') { $('sheetTitle').textContent = 'מטרה חדשה'; $('gName').value = ''; $('gTarget').value = ''; $('gDate').value = ''; $('gStart').value = ''; $('gStartWrap').hidden = false; focus = 'gName'; }
     if (mode === 'goalEdit') { $('sheetTitle').textContent = 'עריכת מטרה'; $('gName').value = obj.name; $('gTarget').value = groupNum(obj.target ?? ''); $('gDate').value = obj.deadline || ''; $('gStartWrap').hidden = true; }
     if (mode === 'deposit') { $('sheetTitle').textContent = obj.name; $('dAmount').value = ''; setDepositSign(1); focus = 'dAmount'; }
@@ -912,7 +952,18 @@
     if (s.mode === 'income') {
       const raw = $('fIncome').value.trim(); const val = raw === '' ? 0 : parseAmount(raw);
       if (!Number.isFinite(val) || val < 0) return sheetError('ההכנסה צריכה להיות מספר, למשל 15000.');
-      const mk = state.view; write(async () => monthRef(mk).set(await seal({ income: val }, ['income'], true), { merge: true }));
+      const extras = [];
+      if ($('fMoreInc').checked) {
+        for (const li of $('incList').children) {
+          const n = li.querySelector('.inc-name').value.trim(), r = li.querySelector('.inc-amt').value.trim();
+          if (!n && !r) continue;
+          const a = parseAmount(r);
+          if (!Number.isFinite(a) || a < 0) { sheetError('הסכום של "' + (n || 'הכנסה נוספת') + '" צריך להיות מספר.'); return li.querySelector('.inc-amt').focus(); }
+          extras.push({ name: n || 'הכנסה נוספת', amount: a });
+        }
+      }
+      const doc = incomeDoc({ incomeMain: val, extras });
+      const mk = state.view; write(async () => monthRef(mk).set(await seal(doc, INCOME_SECRET, true), { merge: true }));
       return closeSheet();
     }
     if (s.mode === 'goalNew' || s.mode === 'goalEdit') {

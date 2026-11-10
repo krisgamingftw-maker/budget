@@ -440,3 +440,14 @@ body { padding-block: 0 180px; }
 .swatch { width: 34px; height: 34px; }
 .logo { background: linear-gradient(150deg, var(--g1), var(--g2), var(--g3)); color: var(--on-hero); }
 .card, .chart-card, .hist, .search-res, .empty-card { border-radius: 24px; }
+
+/* income: extra income lines */
+.inc-extra { display: flex; flex-direction: column; gap: 10px; }
+.inc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inc-row { display: grid; grid-template-columns: 1fr 110px 30px; gap: 8px; align-items: center; }
+.inc-row input { padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); width: 100%; min-width: 0; font-size: .95rem; }
+.inc-row input:focus { border-color: var(--accent); outline: none; }
+.inc-row .inc-amt { text-align: left; font-weight: 700; }
+.inc-extra .btn.small { align-self: flex-start; }
+.inc-total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
+.inc-total b { font-size: 1.2rem; font-weight: 800; color: var(--ink); }
