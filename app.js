@@ -60,8 +60,8 @@
   const CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
   const CAT_WORDS = [
     ['save', /חיסכון|חסכון|הפקדה|השתלמות|פיקדון|פקדון|גמל/],
-    ['food', /סופר|מכולת|שוק|אוכל|ירקות|מאפייה|קצב|רמי לוי|שופרסל|ויקטורי|יוחננוף/],
-    ['car', /דלק|רכב|חניה|חנייה|טסט|מוסך|ביטוח רכב|רב.?קו|תחבורה|מונית|אוטובוס|כביש/],
+    ['food', /סופר(?![ -]?פארם)|מכולת|שוק|אוכל|ירקות|מאפייה|קצב|רמי לוי|שופרסל|ויקטורי|יוחננוף|אושר עד|חצי חינם|יינות ביתן|טיב טעם|קרפור|am:?pm/i],
+    ['car', /דלק|פז|סונול|דור אלון|רכב|חניה|חנייה|טסט|מוסך|ביטוח רכב|רב.?קו|תחבורה|מונית|אוטובוס|כביש/],
     ['bills', /חשמל|מים|גז|ארנונה|אינטרנט|טלפון|סלולר|פלאפון|נטפליקס|ספוטיפיי|מנוי|כבלים|yes|hot|בזק|רואה חשבון|ביטוח לאומי|מס/i],
     ['home', /דירה|שכירות|משכנתא|ועד|בית|ניקיון|רהיט|כלי בית/],
     ['health', /רופא|קופת|תרופ|בית מרקחת|סופר.?פארם|שיניים|טיפול|קוסמטיק|ציפורניים|מספרה|שיער|כושר|חדר כושר|פילאטיס|יוגה|ביטוח בריאות/],
@@ -1075,7 +1075,7 @@
     const url = URL.createObjectURL(file);
     try {
       const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-      const scale = Math.min(3, Math.max(1, 1600 / img.naturalWidth));
+      const scale = img.naturalWidth > 2400 ? 2400 / img.naturalWidth : Math.min(3, Math.max(1, 1600 / img.naturalWidth)); // big phone photos are shrunk so the phone does not run out of memory
       const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
       const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cv.width, cv.height);
       const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data; let sum = 0;
@@ -1085,25 +1085,32 @@
       return cv;
     } finally { URL.revokeObjectURL(url); }
   }
+  // Shared clean-up for one line of recognised text: drops direction marks, currency, dates, times, years and card digits.
+  const MONTHS_RE = '(?:ינו(?:אר)?|פבר(?:ואר)?|מרץ|מרס|אפר(?:יל)?|מאי|יוני?|יולי?|אוג(?:וסט)?|ספט(?:מבר)?|אוק(?:טובר)?|נוב(?:מבר)?|דצמ(?:בר)?|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z׳\']*';
+  function cleanLine(line) {
+    return String(line || '').replace(/[‎‏‪-‮]/g, '').replace(/₪|ש"ח|ש״ח|\bשח\b|nis/gi, ' ').trim();
+  }
+  function stripDates(line) {
+    return line
+      .replace(/\d{1,4}\s*[./\-]\s*\d{1,2}\s*[./\-]\s*\d{1,4}/g, ' ')            // 08/11/2026, 2026-11-08, 8 . 11 . 26
+      .replace(/(^|[^\d,.])(\d{1,2})\s*([./])\s*(\d{1,2})(?![\d,])/g, (m, p, d, sep, mo) => // 08/11, 8.11 (but not a price like 12.50 alone)
+        (Number(d) >= 1 && Number(d) <= 31 && Number(mo) >= 1 && Number(mo) <= 12 && (sep === '/' || (line.match(/\d+/g) || []).length > 2)) ? p + ' ' : m)
+      .replace(new RegExp('\\d{1,2}\\s*(?:ב|ל)?' + MONTHS_RE + '(?:\\s*\\d{2,4})?', 'gi'), ' ') // 8 בנובמבר 2026
+      .replace(new RegExp(MONTHS_RE + '\\s*\\d{2,4}', 'gi'), ' ')                // נובמבר 2026
+      .replace(/\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?/g, ' ')                     // 14:29
+      .replace(/(^|\D)(?:19|20)\d{2}(?=\D|$)/g, (m, p) => p + ' ')               // a lone year
+      .replace(/\*+\s*\d{4}|\d{4}\s*\*+/g, ' ');                                  // card digits ****1234
+  }
+  const NUM_RE = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g;
   // Turn recognised text into {name, amount} lines.
   function parseScan(text) {
     const out = [];
     for (let line of String(text || '').split(/\n+/)) {
-      line = line.replace(/[\u200e\u200f\u202a-\u202e]/g, '');
-      line = line.replace(/₪|ש"ח|ש״ח|\bשח\b|nis/gi, ' ').trim();
+      line = cleanLine(line);
       if (!line) continue;
       if (/^(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)\s*\d{4}$|^\d{4}\s*(ינואר|פברואר|מרץ|מרס|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)$/.test(line)) continue; // a month title
-      const MONTHS_RE = '(?:ינו(?:אר)?|פבר(?:ואר)?|מרץ|מרס|אפר(?:יל)?|מאי|יוני?|יולי?|אוג(?:וסט)?|ספט(?:מבר)?|אוק(?:טובר)?|נוב(?:מבר)?|דצמ(?:בר)?|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z׳\']*';
-      const noDates = line
-        .replace(/\d{1,4}\s*[./\-]\s*\d{1,2}\s*[./\-]\s*\d{1,4}/g, ' ')            // 08/11/2026, 2026-11-08, 8 . 11 . 26
-        .replace(/(^|[^\d,.])(\d{1,2})\s*([./])\s*(\d{1,2})(?![\d,])/g, (m, p, d, sep, mo) => // 08/11, 8.11 (but not a price like 12.50 alone)
-          (Number(d) >= 1 && Number(d) <= 31 && Number(mo) >= 1 && Number(mo) <= 12 && (sep === '/' || (line.match(/\d+/g) || []).length > 2)) ? p + ' ' : m)
-        .replace(new RegExp('\\d{1,2}\\s*(?:ב|ל)?' + MONTHS_RE + '(?:\\s*\\d{2,4})?', 'gi'), ' ') // 8 בנובמבר 2026
-        .replace(new RegExp(MONTHS_RE + '\\s*\\d{2,4}', 'gi'), ' ')                // נובמבר 2026
-        .replace(/\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?/g, ' ')                     // 14:29
-        .replace(/(^|\D)(?:19|20)\d{2}(?=\D|$)/g, (m, p) => p + ' ')               // a lone year
-        .replace(/\*+\s*\d{4}|\d{4}\s*\*+/g, ' ');                                  // card digits ****1234
-      const nums = noDates.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g);
+      const noDates = stripDates(line);
+      const nums = noDates.match(NUM_RE);
       if (!nums) continue;
       const cand = nums.map(n => ({ n, v: Number(n.replace(/,/g, '')) })).filter(x => x.v > 0 && x.v < 1000000);
       if (!cand.length) continue;
@@ -1122,6 +1129,89 @@
       out.push({ name, amount, on: !total });
     }
     return out;
+  }
+  // ---------- receipts: one expense = the shop and the final amount paid ----------
+  const TOTAL_WORD = /ס[הח]\s*["״'׳`]{0,2}\s*כ(?![א-ת])|סך\s*ה?כו?ל|total/i;          // סה"כ, סה''כ, סהכ, סך הכל, total
+  const DUE_WORD = /לתשלו[םס]|לחיוב|amount\s*due|grand\s*total|balance\s*due|total\s*to\s*pay/i;
+  const NOT_TOTAL = /מע["״'׳]?מ|מעמ|vat|tax|לפני|ביניים|sub\s*-?\s*total|פריטים|פריט|כמות|יחידות|הנח|חסכ|חיסכ|חסכון|חיסכון|discount|saving|עודף|change|נקוד|points|משקל|qty|items/i;
+  const WITH_VAT = /כולל\s*מע["״'׳]?מ|כולל\s*מעמ|incl/i;
+  // whole words only (no lookbehind, so older iPhones can still parse this file)
+  const WORD = (src) => new RegExp('(?:^|[^\\u0590-\\u05FFA-Za-z])(?:' + src + ')(?![\\u0590-\\u05FFA-Za-z])', 'i');
+  const PAY_WORD = /אשראי|כרטיס|ויזה|מאסטר|ישראכרט|אמריקן|דיינרס|פייבוקס|שולם|\b(?:visa|master\w*|isracard|amex|diners|max|cal|bit|paybox|apple\s*pay|google\s*pay|paid|card)\b|(?:^|\s)(?:מקס|כאל|ביט)(?=\s|$)/i;
+  const RECEIPT_SIGNS = [
+    /לתשלו[םס]|לחיוב|amount\s*due/i,
+    /קבלה|חשבונית|receipt|invoice/i,
+    /עוסק\s*מורשה|עוסק\s*פטור|ע\s*["״.']?\s*מ\s*[.:]?\s*\d{6,}|ח\s*["״.']?\s*פ\s*[.:]?\s*\d{6,}|ח\.פ|ח"פ|ח״פ|בע["״]?מ/i,
+    /מע["״'׳]?מ|מעמ|\bvat\b/i,
+    /עודף|מזומן|cash|change/i,
+    /קופה|קופאי|קופאית|cashier|\bpos\b/i,
+    /אשראי|ויזה|visa|ישראכרט|mastercard|מאסטרקארד|אמריקן\s*אקספרס|דיינרס|credit/i,
+    /תודה\s*(ש|ו|על|רבה)|להתראות|thank/i,
+    /ברקוד|אסמכתא|מס['׳"]?\s*עסקה|שובר|עסקה|הנפק|מקור|העתק/i,
+    /כמות|מחיר\s*ליח|יח['׳]|qty|price/i,
+  ];
+  const STORES = WORD('שופרסל|רמי\\s*לוי|ויקטורי|יוחננוף|אושר\\s*עד|חצי\\s*חינם|יינות\\s*ביתן|טיב\\s*טעם|מגה\\s*בעיר|קרפור|carrefour|סופר\\s*יודה|מחסני\\s*השוק|פרש\\s*מרקט|am:?pm|סופר[\\s-]*פארם|super[\\s-]*pharm|גוד\\s*פארם|be\\s*פארם|ניו\\s*פארם|איקאה|ikea|ace|הום\\s*סנטר|ksp|באג|מחסני\\s*חשמל|זארה|zara|h&m|קסטרו|castro|פוקס|fox|גולף|רנואר|ארומה|aroma|קפה\\s*קפה|לנדוור|מקדונלד|mcdonald|בורגר\\s*קינג|burger\\s*king|דומינו|פיצה\\s*האט|פז|paz|סונול|sonol|דור\\s*אלון|delek|דלק|ten|yellow|יילו|אלונית|נייס|wolt|וולט|ביתילי|עליאקספרס|aliexpress|amazon|אמזון|shein');
+  // The final amount: prefers "סה"כ לתשלום" / "לתשלום", then a plain "סה"כ", then the card payment line.
+  function amountsIn(str) {
+    const fixed = str.replace(/(\d)\s*,\s*(\d{2})(?!\d)/g, '$1.$2').replace(/(\d)\s+\.\s*(\d{2})(?!\d)|(\d)\.\s+(\d{2})(?!\d)/g, (m, a, b, c, d) => (a || c) + '.' + (b || d)); // 123,40 / 123 .40 → 123.40
+    return (stripDates(fixed).match(NUM_RE) || []).map(n => ({ n, v: Number(n.replace(/,/g, '')) }))
+      .filter(x => x.v > 0 && x.v < 100000 && !(x.v >= 1000 && !/[.,]/.test(x.n) && x.n.length > 5));
+  }
+  function pickAmount(list) {
+    if (!list.length) return null;
+    const dec = list.filter(x => /\.\d{2}$/.test(x.n));
+    const pool = dec.length ? dec : list;
+    return pool.reduce((a, b) => (b.v > a.v ? b : a)).v;
+  }
+  function receiptStore(lines) {
+    const known = (part) => { const m = part.join('\n').match(STORES); return m ? m[0].replace(/^[^\u0590-\u05FFA-Za-z]+/, '').replace(/\s+/g, ' ').trim() : ''; };
+    const top = known(lines.slice(0, 10)); if (top) return top; // a chain name printed in the header
+    for (const raw of lines.slice(0, 8)) {
+      const l = cleanLine(raw);
+      if (/\d+\.\d{2}/.test(l) || TOTAL_WORD.test(l) || DUE_WORD.test(l)) break; // the item list started
+      if (/קבלה|חשבונית|מקור|העתק|עוסק|ח\s*["״.']?\s*פ|ע\s*["״.']\s*מ|טל|פקס|fax|tel|רח['׳]|רחוב|כתובת|www|http|@|\.co|קופה|תאריך|שעה|מס['׳"]|סניף\s*\d|מספר/i.test(l)) continue;
+      const name = l.replace(/בע["״']?מ/g, ' ').replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const longest = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿A-Za-z]/g) || []).length));
+      if (longest >= 3 && name.length <= 40) return name;
+    }
+    return known(lines.slice(-6)); // some chains print their name only in the footer
+  }
+  // Returns {name, amount} when the picture looks like a receipt or invoice, otherwise null.
+  function parseReceipt(text) {
+    const lines = String(text || '').split(/\n+/).map(cleanLine).filter(Boolean);
+    if (lines.length < 3) return null;
+    const all = lines.join('\n');
+    let signs = RECEIPT_SIGNS.filter(re => re.test(all)).length;
+    if (lines.filter(l => /\d\.\d{2}(?!\d)/.test(l)).length >= 3) signs++; // prices with agorot are typical of receipts
+    if (signs < 2) return null;
+    const cands = [];
+    lines.forEach((l, i) => {
+      let rank = 0;
+      if (DUE_WORD.test(l) && !/לפני|ביניים|עודף/.test(l)) rank = 4;
+      else if (TOTAL_WORD.test(l) && WITH_VAT.test(l)) rank = 3;
+      else if (TOTAL_WORD.test(l) && !NOT_TOTAL.test(l)) rank = 2;
+      else if (PAY_WORD.test(l) && !NOT_TOTAL.test(l) && !/\d{1,2}\s*מתוך|תשלומים/.test(l)) rank = 1;
+      if (!rank) return;
+      let amount = pickAmount(amountsIn(l));
+      // the amount is sometimes read as its own line, right after (or before) the label
+      for (const j of [i + 1, i - 1, i + 2]) {
+        if (amount != null) break;
+        const nb = lines[j];
+        if (nb && !/[֐-׿A-Za-z]{2,}/.test(nb)) amount = pickAmount(amountsIn(nb));
+      }
+      if (amount != null) cands.push({ rank, amount, i });
+    });
+    let amount = null;
+    if (cands.length) {
+      const top = Math.max(...cands.map(c => c.rank));
+      amount = cands.filter(c => c.rank === top).pop().amount; // the last one is the final total
+    } else {
+      // no label was read: the biggest price on the receipt is almost always the total
+      const prices = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l)).flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)));
+      amount = prices.length ? Math.max(...prices.map(x => x.v)) : null;
+    }
+    if (amount == null) return null;
+    return { name: receiptStore(lines) || 'קבלה', amount };
   }
   function renderScanRows(rows) {
     const ul = $('scanList'); ul.textContent = '';
@@ -1146,7 +1236,7 @@
     const file = $('scanFile').files && $('scanFile').files[0]; if (!file) return;
     const token = ++scanToken;
     openSheet('scan');
-    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
+    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
     $('scanStatus').hidden = false; $('scanStatusText').textContent = 'טוען את כלי הסריקה…'; $('scanProg').style.width = '5%';
     $('saveBtn').disabled = true;
     let worker = null;
@@ -1154,15 +1244,28 @@
       const T = await loadTesseract();
       const canvas = await prepImage(file);
       if (token !== scanToken) return;
-      worker = await T.createWorker('heb', 1, { logger: m => {
+      worker = await T.createWorker('heb+eng', 1, { logger: m => {
         if (token !== scanToken) return;
         if (m.status === 'recognizing text') { $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * 80) + '%'; }
         else if (/load|initializ/.test(m.status || '')) { $('scanStatusText').textContent = 'מכין את הסריקה…'; $('scanProg').style.width = (5 + (m.progress || 0) * 15) + '%'; }
       } });
       const { data } = await worker.recognize(canvas);
       if (token !== scanToken) return;
-      const rows = parseScan(data && data.text);
+      const text = data && data.text, rows = parseScan(text), receipt = parseReceipt(text);
       $('scanStatus').hidden = true;
+      if (receipt) {
+        $('scanNote').hidden = false; $('scanNote').textContent = 'זיהיתי קבלה, אז לקחתי רק את הסכום הסופי לתשלום. בדקו את שם החנות והסכום לפני ההוספה.';
+        renderScanRows([{ name: receipt.name, amount: receipt.amount, on: true }]);
+        if (rows.length > 1) {
+          $('scanAll').hidden = false;
+          $('scanAll').onclick = () => {
+            $('scanAll').hidden = true; $('scanRecRow').hidden = false;
+            $('scanNote').textContent = 'אלה כל השורות שנקראו מהקבלה. סמנו רק את מה שצריך להוסיף.';
+            renderScanRows(rows.map(r => Object.assign({}, r, { on: false })));
+          };
+        }
+        return;
+      }
       if (!rows.length) { $('scanNote').hidden = false; $('scanNote').textContent = 'לא מצאתי בתמונה שורות עם שם וסכום. נסו צילום מסך חד יותר, או תמונה שבה כל הוצאה בשורה משלה.'; return; }
       $('scanNote').hidden = false; $('scanNote').textContent = 'מצאתי ' + rows.length + ' שורות. בדקו ותקנו שמות וסכומים, והורידו את הסימון ממה שלא צריך.';
       $('scanRecRow').hidden = false;
