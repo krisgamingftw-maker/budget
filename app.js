@@ -1082,7 +1082,10 @@
       return closeSheet();
     }
     if (s.mode === 'scan') {
-      const rows = [...$('scanList').querySelectorAll('li')].filter(li => li.querySelector('input[type=checkbox]').checked)
+      const picked = [...$('scanList').querySelectorAll('li')].filter(li => li.querySelector('input[type=checkbox]').checked);
+      const noAmt = picked.find(li => !(parseAmount(li.querySelector('.amt').value) > 0));
+      if (noAmt) { sheetError('חסר סכום. הקלידו את הסכום לתשלום.'); return noAmt.querySelector('.amt').focus(); }
+      const rows = picked
         .map(li => ({ name: li.querySelector('.nm').value.trim(), amount: parseAmount(li.querySelector('.amt').value) }))
         .filter(r => r.name && Number.isFinite(r.amount) && r.amount > 0);
       if (!rows.length) return sheetError('לא נבחרו הוצאות להוספה.');
@@ -1296,10 +1299,32 @@
       const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cv.width, cv.height);
       const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data; let sum = 0;
       for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; sum += g; }
-      if (sum / (p.length / 4) < 128) for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } // dark mode screenshot
       cx.putImageData(d, 0, 0);
+      const paper = cropPaper(cv, d); if (paper) return paper; // a photo of white paper: never inverted, even in a dim shop
+      if (sum / (p.length / 4) < 128) { for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } cx.putImageData(d, 0, 0); } // dark mode screenshot
       return cv;
     } finally { URL.revokeObjectURL(url); }
+  }
+  // A photo of a receipt held in the hand: cut out the white paper and enlarge it, so the
+  // small print is big enough to read. Screenshots are white edge to edge and stay as they are.
+  function cropPaper(cv, d) {
+    const W = cv.width, H = cv.height, p = d.data;
+    const hist = new Uint32Array(256); for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
+    let acc = 0, p92 = 255; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= 0.92 * W * H) { p92 = v; break; } }
+    const thr = p92 - 25, col = new Float32Array(W), row = new Float32Array(H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (p[(y * W + x) * 4] > thr) { col[x]++; row[y]++; }
+    let x0 = 0, x1 = W - 1, y0 = 0, y1 = H - 1;
+    while (x0 < W && col[x0] / H < 0.15) x0++; while (x1 > x0 && col[x1] / H < 0.15) x1--;
+    while (y0 < H && row[y0] / W < 0.10) y0++; while (y1 > y0 && row[y1] / W < 0.10) y1--;
+    const cw = x1 - x0, ch = y1 - y0;
+    if (cw < W * 0.2 || ch < H * 0.2 || cw > W * 0.85) return null; // no paper found, or it already fills the picture
+    const padX = Math.round(cw * 0.06), padY = Math.round(ch * 0.02);
+    x0 = Math.max(0, x0 - padX); x1 = Math.min(W - 1, x1 + padX); y0 = Math.max(0, y0 - padY); y1 = Math.min(H - 1, y1 + padY);
+    const sw = x1 - x0, sh = y1 - y0, k = Math.min(2.5, 1800 / sw, Math.sqrt(9e6 / (sw * sh)));
+    const out = document.createElement('canvas'); out.width = Math.round(sw * k); out.height = Math.round(sh * k);
+    const ox = out.getContext('2d'); ox.imageSmoothingQuality = 'high'; ox.drawImage(cv, x0, y0, sw, sh, 0, 0, out.width, out.height);
+    out.isPaper = true;
+    return out;
   }
   // Shared clean-up for one line of recognised text: drops direction marks, currency, dates, times, years and card digits.
   const MONTHS_RE = '(?:ינו(?:אר)?|פבר(?:ואר)?|מרץ|מרס|אפר(?:יל)?|מאי|יוני?|יולי?|אוג(?:וסט)?|ספט(?:מבר)?|אוק(?:טובר)?|נוב(?:מבר)?|דצמ(?:בר)?|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z׳\']*';
@@ -1384,7 +1409,8 @@
   const STORES = WORD('שופרסל|רמי\\s*לוי|ויקטורי|יוחננוף|אושר\\s*עד|חצי\\s*חינם|יינות\\s*ביתן|טיב\\s*טעם|מגה\\s*בעיר|קרפור|carrefour|סופר\\s*יודה|מחסני\\s*השוק|פרש\\s*מרקט|am:?pm|סופר[\\s-]*פארם|super[\\s-]*pharm|גוד\\s*פארם|be\\s*פארם|ניו\\s*פארם|איקאה|ikea|ace|הום\\s*סנטר|ksp|באג|מחסני\\s*חשמל|זארה|zara|h&m|קסטרו|castro|פוקס|fox|גולף|רנואר|ארומה|aroma|קפה\\s*קפה|לנדוור|מקדונלד|mcdonald|בורגר\\s*קינג|burger\\s*king|דומינו|פיצה\\s*האט|פז|paz|סונול|sonol|דור\\s*אלון|delek|דלק|ten|yellow|יילו|אלונית|נייס|wolt|וולט|ביתילי|עליאקספרס|aliexpress|amazon|אמזון|shein');
   // The final amount: prefers "סה"כ לתשלום" / "לתשלום", then a plain "סה"כ", then the card payment line.
   function amountsIn(str) {
-    const fixed = str.replace(/(\d)\s*,\s*(\d{2})(?!\d)/g, '$1.$2').replace(/(\d)\s+\.\s*(\d{2})(?!\d)|(\d)\.\s+(\d{2})(?!\d)/g, (m, a, b, c, d) => (a || c) + '.' + (b || d)); // 123,40 / 123 .40 → 123.40
+    const fixed = str.replace(/(^|[^\d.,])(\d{2})\s+\.(\d{3,})(?!\d)/g, '$1$3.$2') // read right to left: "45 .186" is 186.45
+      .replace(/(\d)\s*,\s*(\d{2})(?!\d)/g, '$1.$2').replace(/(\d)\s+\.\s*(\d{2})(?!\d)|(\d)\.\s+(\d{2})(?!\d)/g, (m, a, b, c, d) => (a || c) + '.' + (b || d)); // 123,40 / 123 .40 → 123.40
     return (stripDates(fixed).match(NUM_RE) || []).map(n => ({ n, v: Number(n.replace(/,/g, '')) }))
       .filter(x => x.v > 0 && x.v < 100000 && !(x.v >= 1000 && !/[.,]/.test(x.n) && x.n.length > 5));
   }
@@ -1408,7 +1434,8 @@
       if (l0 !== l && !/[֐-׿A-Za-z]{3,}/.test(l0)) continue;
       const name = l0.replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
       const longest = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿A-Za-z]/g) || []).length));
-      if (longest >= 3 && name.length <= 40) return name;
+      const heb = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿]/g) || []).length));
+      if (longest >= 3 && name.length <= 40 && heb >= 3) return name.split(' ').filter(w => !/^[A-Za-z]{1,3}$/.test(w)).join(' ');
     }
     return known(lines.slice(-6)); // some chains print their name only in the footer
   }
@@ -1420,6 +1447,8 @@
     const all = lines.join('\n');
     let signs = RECEIPT_SIGNS.filter(re => re.test(all)).length;
     if (lines.filter(l => /\d\.\d{2}(?!\d)/.test(l)).length >= 3) signs++; // prices with agorot are typical of receipts
+    if (lines.filter(l => /(?:^|\D)\d{12,13}(?!\d)/.test(l)).length >= 2) signs++; // product barcodes
+    if (lines.filter(l => /(?:^|[\s=])[-–]\s?\d+[.,]\d{2}(?!\d)/.test(l)).length >= 2) signs++; // discounts
     if (!force && signs < 2) return null;
     const cands = [];
     lines.forEach((l, i) => {
@@ -1444,8 +1473,14 @@
       amount = cands.filter(c => c.rank === top).pop().amount; // the last one is the final total
     } else {
       // no label was read: the biggest price on the receipt is almost always the total
-      const prices = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l)).flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)));
-      amount = prices.length ? Math.max(...prices.map(x => x.v)) : null;
+      // no label was read: trust the biggest price only when it stands on its own line or shows up twice
+      // (the total is printed by itself and again next to the payment); otherwise leave it for the person to type.
+      const ok = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l));
+      const prices = ok.flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)).map(x => Object.assign(x, { alone: !/[֐-׿A-Za-z]{2,}/.test(l) })));
+      const top = prices.length ? Math.max(...prices.map(x => x.v)) : null;
+      const sure = top != null && (prices.filter(x => x.v === top).length >= 2 || prices.some(x => x.v === top && x.alone));
+      amount = sure ? top : null;
+      if (amount == null && !force) return { name: receiptStore(lines) || 'קבלה', amount: null };
     }
     if (amount == null && force) { const any = lines.flatMap(amountsIn); amount = any.length ? pickAmount(any) : null; }
     if (amount == null) return null;
@@ -1458,7 +1493,7 @@
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = r.on; cb.setAttribute('aria-label', 'להוסיף את ' + r.name);
       cb.onchange = () => { li.classList.toggle('off', !cb.checked); updateScanCount(); };
       const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'nm'; nm.value = r.name; nm.maxLength = 80;
-      const am = document.createElement('input'); am.type = 'text'; am.className = 'amt num'; am.inputMode = 'decimal'; am.value = groupNum(r.amount);
+      const am = document.createElement('input'); am.type = 'text'; am.className = 'amt num'; am.inputMode = 'decimal'; am.value = r.amount == null ? '' : groupNum(r.amount); am.placeholder = 'סכום';
       am.addEventListener('input', () => { am.value = groupNum(am.value); });
       li.append(cb, nm, am); ul.append(li);
     }
@@ -1487,13 +1522,18 @@
         if (m.status === 'recognizing text') { $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * 80) + '%'; }
         else if (/load|initializ/.test(m.status || '')) { $('scanStatusText').textContent = 'מכין את הסריקה…'; $('scanProg').style.width = (5 + (m.progress || 0) * 15) + '%'; }
       } });
+      if (canvas.isPaper && worker.setParameters) await worker.setParameters({ tessedit_pageseg_mode: '6' }); // one block of text reads a receipt photo best
       const { data } = await worker.recognize(canvas);
       if (token !== scanToken) return;
       const text = data && data.text, rows = parseScan(text), receipt = parseReceipt(text);
       $('scanStatus').hidden = true;
       if (receipt) {
-        $('scanNote').hidden = false; $('scanNote').textContent = 'זיהיתי חשבונית או קבלה, אז לקחתי רק את השם ואת הסכום הסופי לתשלום. בדקו אותם לפני ההוספה.';
+        $('scanNote').hidden = false;
+        $('scanNote').textContent = receipt.amount == null
+          ? 'זיהיתי קבלה, אבל לא הצלחתי לקרוא בה את הסכום לתשלום. הקלידו אותו כאן. בפעם הבאה כדאי לצלם את הקבלה ישר ומקרוב, כך שתמלא את רוב התמונה.'
+          : 'זיהיתי חשבונית או קבלה, אז לקחתי רק את השם ואת הסכום הסופי לתשלום. בדקו אותם לפני ההוספה.';
         renderScanRows([{ name: receipt.name, amount: receipt.amount, on: true }]);
+        if (receipt.amount == null) setTimeout(() => { const a = $('scanList').querySelector('.amt'); if (a) a.focus(); }, 50);
         if (rows.length > 1) {
           $('scanAll').hidden = false;
           $('scanAll').onclick = () => {

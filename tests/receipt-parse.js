@@ -141,4 +141,8 @@ const notes=`תשלומים חודש נובמבר
 גן 2800
 חוג 250`;
 ok(parseReceipt(notes)===null,'list with card names is not a receipt');
+// OCR of a real hand-held photo of a supermarket receipt: too blurry to read the total, but it must
+// still be one expense (to type the amount into), not 20 lines of noise.
+const photo=fs.readFileSync(path.join(__dirname,'fixtures-shufersal-photo.txt'),'utf8');const pr=parseReceipt(photo);console.log('photo',JSON.stringify(pr));
+ok(pr&&pr.amount==null,'blurry receipt photo → one expense with the amount left to type');
 console.log(fail?fail+' FAILED':'ALL PASSED');process.exit(fail?1:0);
