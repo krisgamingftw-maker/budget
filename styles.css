@@ -451,3 +451,21 @@ body { padding-block: 0 180px; }
 .inc-extra .btn.small { align-self: flex-start; }
 .inc-total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
 .inc-total b { font-size: 1.2rem; font-weight: 800; color: var(--ink); }
+
+/* family categories */
+.cat-row .cat-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-add { border-style: dashed; color: var(--accent-deep); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 50%, transparent); font-weight: 600; }
+.newcat { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.newcat input { padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); font-size: 1rem; flex: 1 1 120px; min-width: 0; }
+.newcat input:focus, .newcat-emoji:focus { border-color: var(--accent); outline: none; }
+.newcat .newcat-emoji, #fNewCatEmoji { flex: 0 0 56px; width: 56px; text-align: center; }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; }
+.emoji-btn { border: 1.5px solid var(--line); background: var(--bg); border-radius: 12px; height: 42px; font-size: 1.25rem; padding: 0; }
+.emoji-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+#cColors .swatch { border-color: var(--paper); }
+.cat-preview { display: flex; justify-content: center; }
+.cat-preview .cat-row { box-shadow: var(--shadow); }
+.cat-chip { display: inline-flex; align-items: center; gap: 4px; }
+.cat-chip .dot { background: var(--cc); margin-inline-end: 2px; }
+.cat-chip .ed { display: inline-flex; color: var(--muted); margin-inline-start: 4px; }
+.cat-chip .ed svg { width: 14px; height: 14px; }

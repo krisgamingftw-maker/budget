@@ -182,6 +182,13 @@
           <p>אם כל אחד מכם פתח תקציב נפרד, אחד מכם מקליד כאן את הקוד של השני ועובר לתקציב המשותף.</p>
           <div><button class="btn ghost small" id="joinOtherBtn">הצטרפות עם קוד</button></div>
         </div>
+        <div class="card" id="catCard">
+          <h2>קטגוריות</h2>
+          <p>הקטגוריות שתוסיפו כאן משותפות לכל המשפחה, ואפשר לבחור אותן בכל הוצאה. לחיצה על קטגוריה פותחת עריכה.</p>
+          <div class="chips" id="setCats"></div>
+          <p id="setCatsEmpty" style="font-size:.85rem">עדיין לא הוספתם קטגוריות משלכם.</p>
+          <div><button class="btn ghost small" id="setCatAdd">הוספת קטגוריה</button></div>
+        </div>
         <div class="card" id="encCard">
           <h2 id="encTitle">הצפנת הנתונים</h2>
           <p id="encText"></p>
@@ -238,7 +245,14 @@
     <input type="file" id="scanFile" accept="image/*" hidden>
     <label class="field"><span>סכום ₪</span><input id="fAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
     <label class="field"><span>על מה</span><input id="fName" placeholder="למשל: חשמל" maxlength="80"></label>
-    <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div></div>
+    <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div>
+      <div class="newcat" id="fNewCat" hidden>
+        <input id="fNewCatEmoji" class="newcat-emoji" maxlength="8" placeholder="🏷️" aria-label="אימוג'י לקטגוריה">
+        <input id="fNewCatName" maxlength="24" placeholder="שם הקטגוריה" aria-label="שם הקטגוריה החדשה">
+        <button type="button" class="btn small" id="fNewCatOk">הוספה</button>
+        <button type="button" class="link-btn" id="fNewCatCancel">ביטול</button>
+      </div>
+    </div>
     <div class="switch-row">
       <div class="t"><b>הוצאה קבועה</b><small>תעבור לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="fRec" aria-label="הוצאה קבועה"><i></i></label>
@@ -305,6 +319,13 @@
       <div class="t"><b>להוסיף כהוצאות קבועות</b><small>יעברו לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="scanRec" aria-label="הוצאות קבועות"><i></i></label>
     </div>
+  </div>
+  <div class="sgroup" data-for="cat" style="display:flex;flex-direction:column;gap:12px">
+    <div class="cat-preview"><span class="cat-row on" id="cPreview" aria-hidden="true"><span class="cat-ico">🏷️</span><span class="cat-name">שם הקטגוריה</span></span></div>
+    <label class="field"><span>שם הקטגוריה</span><input id="cName" maxlength="24" placeholder="למשל: מתנות"></label>
+    <div class="field"><span>אימוג'י</span><div class="emoji-grid" id="cEmojis"></div>
+      <input id="cEmoji" class="newcat-emoji" maxlength="8" placeholder="או הקלידו אחד משלכם" aria-label="אימוג'י משלכם" style="width:100%;text-align:start"></div>
+    <div class="field"><span>צבע</span><div class="palette" id="cColors" style="justify-content:flex-start;flex-wrap:wrap"></div></div>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>

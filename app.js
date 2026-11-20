@@ -11,7 +11,7 @@
   const state = {
     fb: null, auth: null, db: null, user: null,
     hid: null, household: null,
-    items: [], months: {}, goals: [], savings: [],
+    items: [], months: {}, goals: [], savings: [], cats: [],
     loaded: false, unsubs: [],
     tab: 'vMonth', view: todayKey, showPaid: true,
     sheet: null, depositSign: 1, busy: false,
@@ -50,14 +50,30 @@
   }
   ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount', 'svBalance', 'svMonthly', 'sbAmount', 'spAmount'].forEach(id => liveCommas($(id)));
   // ---------- categories ----------
-  const CATS = [
+  const BASE_CATS = [
     { id: 'home', n: 'בית', e: '🏠' }, { id: 'bills', n: 'חשבונות', e: '💡' }, { id: 'food', n: 'אוכל וסופר', e: '🛒' },
     { id: 'car', n: 'רכב ותחבורה', e: '🚗' }, { id: 'health', n: 'בריאות וטיפוח', e: '💊' }, { id: 'kids', n: 'ילדים וחיות', e: '🐾' },
     { id: 'fun', n: 'בזבוזים ופנאי', e: '🎉' }, { id: 'save', n: 'חיסכון', e: '🐷' }, { id: 'misc', n: 'שונות', e: '📦' }
   ];
-  const CAT_COLOR = { home: '#f0ad9a', bills: '#f2c66d', food: '#93cdb0', car: '#94bde3', health: '#e9a3c0', kids: '#c3a7e6', fun: '#f19aae', save: '#7fc9bb', misc: '#c9bdb4' };
-  const CAT_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
-  const CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
+  const BASE_COLOR = { home: '#f0ad9a', bills: '#f2c66d', food: '#93cdb0', car: '#94bde3', health: '#e9a3c0', kids: '#c3a7e6', fun: '#f19aae', save: '#7fc9bb', misc: '#c9bdb4' };
+  const BASE_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
+  // Families can add their own categories. They are shared by everyone in the budget
+  // (collection `cats`) and come after the built-in ones, before "שונות".
+  let CATS = BASE_CATS.slice(), CAT_BY = {}, CAT_COLOR = {}, CAT_SHORT = {};
+  const CUSTOM_COLORS = ['#f4b183', '#a8d5a2', '#9ecbe8', '#d8b4e2', '#f7d08a', '#f2a7b8', '#8fd3c8', '#c4c99a', '#b9b3f0', '#e8b69a'];
+  const CAT_EMOJIS = ['🏷️', '🎁', '🎓', '✈️', '👶', '🐶', '💄', '👗', '🍔', '☕', '🏋️', '📚', '🎮', '💻', '📱', '🧾', '🏥', '🔧', '🌱', '💍', '🕍', '🎂', '🧸', '💸'];
+  function applyCats(custom) {
+    const list = (custom || []).filter(c => c && c.name && !c.locked).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(b.id));
+    const mine = list.map((c, i) => ({ id: c.id, n: String(c.name), e: c.emoji || '🏷️', custom: true, color: c.color || CUSTOM_COLORS[i % CUSTOM_COLORS.length] }));
+    const misc = BASE_CATS[BASE_CATS.length - 1];
+    CATS = BASE_CATS.slice(0, -1).concat(mine, [misc]);
+    CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
+    CAT_COLOR = Object.assign({}, BASE_COLOR); CAT_SHORT = Object.assign({}, BASE_SHORT);
+    mine.forEach(c => { CAT_COLOR[c.id] = c.color; CAT_SHORT[c.id] = c.n; });
+  }
+  applyCats([]);
+  const customCats = () => CATS.filter(c => c.custom);
+  const normName = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const CAT_WORDS = [
     ['save', /חיסכון|חסכון|הפקדה|השתלמות|פיקדון|פקדון|גמל/],
     ['food', /סופר(?![ -]?פארם)|מכולת|שוק|אוכל|ירקות|מאפייה|קצב|רמי לוי|שופרסל|ויקטורי|יוחננוף|אושר עד|חצי חינם|יינות ביתן|טיב טעם|קרפור|am:?pm/i],
@@ -68,7 +84,11 @@
     ['kids', /גן|מעון|צהרון|חוג|ילד|תינוק|חיתול|כלב|חתול|וטרינר|אוכל כלבים|אוכל חתולים/],
     ['fun', /בית קפה|בתי קפה|קפה|מסעד|אוכל בחוץ|וולט|wolt|תן ביס|בילוי|סרט|הופעה|חופשה|טיול|בגדים|קניות|זארה|שופינג|מתנה|אמזון|עלי|shein/i]
   ];
-  function guessCat(name) { const t = String(name || ''); for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
+  function guessCat(name) {
+    const t = String(name || ''), low = normName(t);
+    // An expense whose name contains a family category's name goes there first.
+    for (const c of customCats()) { const n = normName(c.n); if (n.length >= 2 && low.includes(n)) return c.id; }
+    for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
   const catOf = (it) => (it && it.cat && CAT_BY[it.cat]) ? it.cat : (it && it.linkType === 'sav' ? 'save' : guessCat(it && it.name));
 
   function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -109,6 +129,8 @@
   const ITEM_SECRET = ['name', 'amount', 'cat'];
   const savRef = (id) => hh().collection('savings').doc(id);
   const SAV_FIELDS = ['name', 'kind', 'balance', 'monthly', 'endDate'];
+  const catRef = (id) => hh().collection('cats').doc(id);
+  const CAT_SECRET = ['name', 'emoji'];
 
   function failMsg(e) {
     if (e && e.code === 'permission-denied') return 'אין הרשאה לשמור. נסו לצאת ולהיכנס שוב.';
@@ -181,19 +203,21 @@
     if (out.split) out.paid = out.spent >= (Number(out.amount) || 0) && out.spent > 0;
     return out;
   }
-  const raw = { items: [], months: {}, goals: [], savings: [] };
+  const raw = { items: [], months: {}, goals: [], savings: [], cats: [] };
   let decodeRun = 0;
   async function decodeAll() {
     const run = ++decodeRun;
     const items = await Promise.all(raw.items.map(openItem));
     const mk = Object.keys(raw.months); const mv = await Promise.all(mk.map(k => openDoc(raw.months[k])));
     const goals = await Promise.all(raw.goals.map(openGoal));
+    const cats = await Promise.all(raw.cats.map(openDoc));
     const savings = await Promise.all(raw.savings.map(async v => {
       const out = await openDoc(v);
       out.deposits = await Promise.all((Array.isArray(v.deposits) ? v.deposits : []).map(openDoc));
       return out;
     }));
     if (run !== decodeRun) return;
+    state.cats = cats; applyCats(cats); if (state.catFilter && !CAT_BY[state.catFilter]) state.catFilter = null; buildCatChips();
     state.savings = savings;
     state.items = items; state.months = {}; mk.forEach((k, i) => { state.months[k] = mv[i]; }); state.goals = goals;
     render();
@@ -240,6 +264,7 @@
       if (sp) body.deposits = await Promise.all(v.deposits.map(x => x.e ? x : sealAmount(x)));
       writes.push([savRef(v.id), body]);
     }
+    for (const c of raw.cats) { if (!c.e) writes.push([catRef(c.id), await seal({ name: c.name || '', emoji: c.emoji || '' }, CAT_SECRET, true)]); }
     for (let i = 0; i < writes.length; i += 400) { const b = state.db.batch(); writes.slice(i, i + 400).forEach(([r, d]) => b.update(r, d)); await b.commit(); }
     return code;
   }
@@ -745,13 +770,45 @@
   $('hSearch').addEventListener('input', renderSearch);
 
   // ---------- settings ----------
+  // ---------- family categories (settings + sheet) ----------
+  let catSheetColor = CUSTOM_COLORS[0];
+  function renderCatSettings() {
+    const box = $('setCats'); if (!box) return; box.textContent = '';
+    const mine = customCats();
+    $('setCatsEmpty').hidden = mine.length > 0;
+    for (const c of mine) {
+      const b = el('button', 'chip cat-chip'); b.type = 'button'; b.style.setProperty('--cc', c.color);
+      const ed = el('span', 'ed'); ed.innerHTML = EDIT_SVG; b.append(el('i', 'dot'), c.e + ' ' + c.n, ed);
+      b.setAttribute('aria-label', 'עריכת הקטגוריה ' + c.n);
+      b.onclick = () => openSheet('catEdit', { id: c.id });
+      box.append(b);
+    }
+  }
+  (function buildCatSheet() {
+    const eb = $('cEmojis');
+    for (const e of CAT_EMOJIS) { const b = el('button', 'emoji-btn', e); b.type = 'button'; b.dataset.e = e; b.setAttribute('aria-label', e); b.onclick = () => { $('cEmoji').value = e; syncCatSheet(); }; eb.append(b); }
+    const cb = $('cColors');
+    for (const c of CUSTOM_COLORS) { const b = el('button', 'swatch'); b.type = 'button'; b.dataset.col = c; b.style.background = c; b.setAttribute('aria-label', 'צבע'); b.onclick = () => { catSheetColor = c; syncCatSheet(); }; cb.append(b); }
+    $('cEmoji').addEventListener('input', syncCatSheet);
+    $('cName').addEventListener('input', syncCatSheet);
+  })();
+  function syncCatSheet() {
+    const e = $('cEmoji').value.trim();
+    document.querySelectorAll('#cEmojis .emoji-btn').forEach(b => b.setAttribute('aria-pressed', b.dataset.e === e ? 'true' : 'false'));
+    document.querySelectorAll('#cColors .swatch').forEach(b => b.setAttribute('aria-pressed', b.dataset.col === catSheetColor ? 'true' : 'false'));
+    const pv = $('cPreview'); pv.style.setProperty('--cc', catSheetColor);
+    pv.querySelector('.cat-ico').textContent = e || '🏷️';
+    pv.querySelector('.cat-name').textContent = $('cName').value.trim() || 'שם הקטגוריה';
+  }
+  $('setCatAdd').onclick = () => openSheet('catNew');
+
   function renderSettings() {
     const h = state.household || {};
     $('hhName').textContent = h.name || 'התקציב שלנו';
     const emails = h.emails ? Object.values(h.emails) : [];
     $('hhMembers').textContent = emails.length ? 'משתמשים בתקציב: ' + emails.join(', ') : '';
     $('codeText').textContent = prettyCode(state.hid);
-    renderEncCard();
+    renderEncCard(); renderCatSettings();
     $('whoami').textContent = 'מחוברים בתור ' + ((state.user && state.user.email) || '');
   }
   $('copyCode').onclick = async () => {
@@ -814,13 +871,14 @@
   $('incAdd').onclick = () => { const li = incRow(); $('incList').append(li); li.querySelector('.inc-name').focus(); };
   $('fIncome').addEventListener('input', updIncTotal);
 
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
     sheetError('');
     $('confirmBox').hidden = true; $('sheetActions').hidden = false;
-    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit');
+    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit' || mode === 'catEdit');
+    closeNewCat();
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
     if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); setCat(state.catFilter || null, !state.catFilter); focus = 'fAmount'; }
@@ -843,6 +901,14 @@
       $('epPass').value = ''; $('epPass2').value = ''; focus = 'epPass';
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
+    if (mode === 'catNew' || mode === 'catEdit') {
+      const c = mode === 'catEdit' ? CAT_BY[obj.id] : null;
+      $('sheetTitle').textContent = c ? 'עריכת קטגוריה' : 'קטגוריה חדשה';
+      $('cName').value = c ? c.n : ''; $('cEmoji').value = c ? c.e : '';
+      const used = new Set(customCats().map(x => x.color));
+      catSheetColor = c ? c.color : (CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[0]);
+      syncCatSheet(); focus = 'cName';
+    }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
     $('saveBtn').textContent = mode === 'scan' ? 'הוספה' : mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
@@ -880,6 +946,21 @@
       return;
     }
     const FV = firebase.firestore.FieldValue;
+    if (s.mode === 'catNew') {
+      const id = addCustomCat($('cName').value, $('cEmoji').value, catSheetColor, (m) => { sheetError(m); $('cName').focus(); });
+      if (id) { closeSheet(); render(); }
+      return;
+    }
+    if (s.mode === 'catEdit') {
+      const name = $('cName').value.trim().replace(/\s+/g, ' '), emoji = $('cEmoji').value.trim() || '🏷️';
+      if (!name) { sheetError('צריך לכתוב שם לקטגוריה.'); return $('cName').focus(); }
+      if (CATS.some(c => c.id !== s.id && (normName(c.n) === normName(name) || normName(CAT_SHORT[c.id]) === normName(name)))) { sheetError('כבר יש קטגוריה בשם הזה.'); return $('cName').focus(); }
+      const color = catSheetColor;
+      state.cats = (state.cats || []).map(c => c.id === s.id ? Object.assign({}, c, { name, emoji, color }) : c);
+      applyCats(state.cats); buildCatChips(); render();
+      write(async () => catRef(s.id).update(Object.assign(await seal({ name, emoji }, CAT_SECRET, true), { color })));
+      closeSheet(); return;
+    }
     if (s.mode === 'add' || s.mode === 'edit') {
       const name = $('fName').value.trim(); const amtRaw = $('fAmount').value.trim(); const amount = parseAmount(amtRaw);
       if (!amtRaw || !Number.isFinite(amount) || amount < 0) { sheetError('צריך לכתוב סכום, למשל 350.'); return $('fAmount').focus(); }
@@ -1036,8 +1117,10 @@
   $('scrim').onclick = closeSheet;
   $('deleteBtn').onclick = () => {
     const s = state.sheet || {};
-    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : (state.items.find(i => i.id === s.id) || {}).name;
-    $('confirmText').textContent = 'למחוק את "' + (name || '') + '"?';
+    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : s.mode === 'catEdit' ? (CAT_BY[s.id] || {}).n : (state.items.find(i => i.id === s.id) || {}).name;
+    $('confirmText').textContent = s.mode === 'catEdit'
+      ? 'למחוק את הקטגוריה "' + (name || '') + '"? ההוצאות שבה לא יימחקו, הן יעברו לקטגוריה שמתאימה להן אוטומטית.'
+      : 'למחוק את "' + (name || '') + '"?';
     $('confirmBox').hidden = false; $('sheetActions').hidden = true;
   };
   $('confirmNo').onclick = () => { $('confirmBox').hidden = true; $('sheetActions').hidden = false; };
@@ -1045,6 +1128,12 @@
     const s = state.sheet || {}; if (!s.id) return;
     if (s.mode === 'goalEdit') write(() => goalRef(s.id).delete());
     else if (s.mode === 'savEdit') write(() => savRef(s.id).delete());
+    else if (s.mode === 'catEdit') {
+      state.cats = (state.cats || []).filter(c => c.id !== s.id); applyCats(state.cats);
+      if (state.catFilter === s.id) state.catFilter = null;
+      buildCatChips(); render();
+      write(() => catRef(s.id).delete());
+    }
     else { const it = state.items.find(x => x.id === s.id); if (it) deleteItem(it); }
     closeSheet();
   };
@@ -1055,10 +1144,43 @@
     catAuto = !!auto; pickedCat = id || guessCat($('fName').value);
     document.querySelectorAll('#fCats button').forEach(b => b.setAttribute('aria-pressed', b.dataset.c === pickedCat ? 'true' : 'false'));
   }
-  (function buildCatChips() {
-    const box = $('fCats');
-    for (const c of CATS) { const b = el('button', 'chip', c.e + ' ' + c.n); b.type = 'button'; b.dataset.c = c.id; b.onclick = () => setCat(c.id, false); box.append(b); }
-  })();
+  function buildCatChips() {
+    const box = $('fCats'); box.textContent = '';
+    for (const c of CATS) {
+      const b = el('button', 'chip', c.e + ' ' + c.n); b.type = 'button'; b.dataset.c = c.id;
+      b.setAttribute('aria-pressed', c.id === pickedCat ? 'true' : 'false');
+      if (c.custom) b.style.setProperty('--cc', c.color);
+      b.onclick = () => setCat(c.id, false); box.append(b);
+    }
+    const add = el('button', 'chip chip-add', '＋ קטגוריה חדשה'); add.type = 'button'; add.id = 'fCatAdd';
+    add.onclick = () => { $('fNewCat').hidden = false; $('fNewCatName').value = ''; $('fNewCatEmoji').value = ''; add.hidden = true; $('fNewCatName').focus(); };
+    box.append(add);
+    if (state.cats) renderCatSettings();
+  }
+  buildCatChips();
+  function closeNewCat() { $('fNewCat').hidden = true; const a = $('fCatAdd'); if (a) a.hidden = false; }
+  // Adds a family category. Returns its id, or null with an error shown.
+  function addCustomCat(name, emoji, color, onError) {
+    name = String(name || '').trim().replace(/\s+/g, ' ');
+    emoji = String(emoji || '').trim();
+    if (!name) { onError('צריך לכתוב שם לקטגוריה.'); return null; }
+    if (CATS.some(c => normName(c.n) === normName(name) || normName(CAT_SHORT[c.id]) === normName(name))) { onError('כבר יש קטגוריה בשם הזה.'); return null; }
+    const used = new Set(customCats().map(c => c.color));
+    const doc = { name, emoji: emoji || '🏷️', color: color || CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[customCats().length % CUSTOM_COLORS.length], createdAt: Date.now() };
+    const id = 'c' + rid();
+    // Show it right away; the saved copy replaces it when it syncs.
+    state.cats = (state.cats || []).filter(c => c.id !== id).concat([Object.assign({ id }, doc)]);
+    applyCats(state.cats); buildCatChips();
+    write(async () => catRef(id).set(await seal(doc, CAT_SECRET)));
+    return id;
+  }
+  $('fNewCatOk').onclick = () => {
+    const id = addCustomCat($('fNewCatName').value, $('fNewCatEmoji').value, null, (m) => { sheetError(m); $('fNewCatName').focus(); });
+    if (!id) return;
+    sheetError(''); closeNewCat(); setCat(id, false); render();
+  };
+  $('fNewCatCancel').onclick = () => { sheetError(''); closeNewCat(); };
+  $('fNewCatName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('fNewCatOk').click(); } });
   $('fName').addEventListener('input', () => { if (catAuto) setCat(null, true); });
   $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:')) setCat('save', true); });
   // ---------- scan expenses from a picture (runs on the phone, nothing is uploaded) ----------
@@ -1507,8 +1629,8 @@
   function stopListening() { state.unsubs.forEach(f => { try { f(); } catch (e) {} }); state.unsubs = []; }
   function openHousehold(hid) {
     stopListening();
-    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = []; raw.savings = [];
-    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = []; state.savings = [];
+    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = []; raw.savings = []; raw.cats = [];
+    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = []; state.savings = []; state.cats = []; state.catFilter = null; applyCats([]);
     show('loading');
     const db = state.db; const base = db.collection('households').doc(hid);
     let got = { items: false, months: false };
@@ -1537,6 +1659,10 @@
     }, onErr));
     state.unsubs.push(base.collection('savings').onSnapshot(snap => {
       raw.savings = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      decodeAll();
+    }, onErr));
+    state.unsubs.push(base.collection('cats').onSnapshot(snap => {
+      raw.cats = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
       decodeAll();
     }, onErr));
     state.unsubs.push(base.collection('goals').onSnapshot(snap => {
