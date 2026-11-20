@@ -499,3 +499,4 @@ button.hchip#afterChip { border: 0; font: inherit; cursor: pointer; }
 .oc-bar { height: 8px; border-radius: 9px; background: var(--bg); overflow: hidden; }
 .oc-bar i { display: block; height: 100%; border-radius: 9px; background: var(--cc, var(--accent)); }
 .over-cat small { color: var(--muted); font-size: .76rem; }
+.scan-one { border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); color: var(--accent-deep); border-radius: 14px; padding: 10px 12px; font: inherit; font-weight: 600; font-size: .9rem; text-align: start; }

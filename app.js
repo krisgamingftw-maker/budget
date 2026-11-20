@@ -1365,6 +1365,21 @@
     /תודה\s*(ש|ו|על|רבה)|להתראות|thank/i,
     /ברקוד|אסמכתא|מס['׳"]?\s*עסקה|שובר|עסקה|הנפק|מקור|העתק/i,
     /כמות|מחיר\s*ליח|יח['׳]|qty|price/i,
+    // bills: electricity, water, phone, internet, arnona, insurance
+    /חשבון\s*(?:חשמל|מים|גז|תקופתי|טלפון|סלולר)|תקופת\s*(?:ה?חשבון|ה?חיוב)|חיוב\s*(?:לתקופה|תקופתי)|מספר\s*(?:לקוח|מנוי|חוזה|צרכן|משלם|חשבון)|הוראת\s*קבע|מועד\s*(?:ה?חיוב|ה?תשלום)|ארנונה|קוט["״']?ש|הודעת\s*תשלום|דמי\s*מנוי|פוליסה|פרמיה/i,
+  ];
+  // Bill senders, shown by the expense they stand for.
+  const BILLERS = [
+    [/חברת\s*ה?חשמל|\biec\b|חשבון\s*חשמל|אלקטרה\s*פאוור|סלקום\s*אנרגיה|פזאנרגיה|אמישראגז\s*חשמל/i, 'חשמל'],
+    [/ארנונה/i, 'ארנונה'],
+    [/(?:^|\s)מי\s+[א-ת]|תאגיד\s*(?:ה)?מים|חשבון\s*מים|מקורות|מים\s*וביוב|מי\s*אביבים|הגיחון|מי\s*רעננה|מי\s*שבע|מי\s*כרמל|מי\s*נתניה|מי\s*הרצליה|מי\s*ציונה|מי\s*מודיעין|מי\s*רמת\s*גן|מי\s*לוד|עין\s*אפק|יובלים|פלג\s*הגליל|מי\s*גבעתיים|מי\s*ראשון|מניב\s*ראשון|מי\s*עדן|מי\s*נעם|מיתר|הרי\s*נצרת|מי\s*הוד\s*השרון|מי\s*כפר\s*סבא|מי\s*אשקלון|מי\s*אשדוד|מי\s*יבנה|מי\s*בת\s*ים|מי\s*חולון|מי\s*פתח\s*תקווה|מי\s*בני\s*ברק|מי\s*רחובות/i, 'מים'],
+    [/סופרגז|אמישראגז|פזגז|דור\s*גז|חשבון\s*גז/i, 'גז'],
+    [/בזק\s*בינלאומי/i, 'בזק בינלאומי'], [/בזק/i, 'בזק'], [/הוט\s*מובייל|hot\s*mobile/i, 'הוט מובייל'], [/(?:^|[^א-ת])הוט(?![א-ת])|\bhot\b/i, 'הוט'],
+    [/פרטנר|partner/i, 'פרטנר'], [/סלקום|cellcom/i, 'סלקום'], [/פלאפון|pelephone/i, 'פלאפון'], [/גולן\s*טלקום|golan/i, 'גולן טלקום'],
+    [/\byes\b|(?:^|[^א-ת])יס(?![א-ת])/i, 'yes'], [/we4g|רמי\s*לוי\s*תקשורת/i, 'רמי לוי תקשורת'], [/012\s*מובייל|xphone/i, '012 מובייל'], [/019/i, '019'],
+    [/נטפליקס|netflix/i, 'נטפליקס'], [/ספוטיפיי|spotify/i, 'ספוטיפיי'],
+    [/ביטוח\s*לאומי/i, 'ביטוח לאומי'], [/מכבי/i, 'מכבי'], [/כללית/i, 'כללית'], [/מאוחדת/i, 'מאוחדת'], [/לאומית/i, 'לאומית'],
+    [/ועד\s*ה?בית/i, 'ועד בית'],
   ];
   const STORES = WORD('שופרסל|רמי\\s*לוי|ויקטורי|יוחננוף|אושר\\s*עד|חצי\\s*חינם|יינות\\s*ביתן|טיב\\s*טעם|מגה\\s*בעיר|קרפור|carrefour|סופר\\s*יודה|מחסני\\s*השוק|פרש\\s*מרקט|am:?pm|סופר[\\s-]*פארם|super[\\s-]*pharm|גוד\\s*פארם|be\\s*פארם|ניו\\s*פארם|איקאה|ikea|ace|הום\\s*סנטר|ksp|באג|מחסני\\s*חשמל|זארה|zara|h&m|קסטרו|castro|פוקס|fox|גולף|רנואר|ארומה|aroma|קפה\\s*קפה|לנדוור|מקדונלד|mcdonald|בורגר\\s*קינג|burger\\s*king|דומינו|פיצה\\s*האט|פז|paz|סונול|sonol|דור\\s*אלון|delek|דלק|ten|yellow|יילו|אלונית|נייס|wolt|וולט|ביתילי|עליאקספרס|aliexpress|amazon|אמזון|shein');
   // The final amount: prefers "סה"כ לתשלום" / "לתשלום", then a plain "סה"כ", then the card payment line.
@@ -1380,26 +1395,32 @@
     return pool.reduce((a, b) => (b.v > a.v ? b : a)).v;
   }
   function receiptStore(lines) {
+    const head = lines.slice(0, 12).join('\n');
+    for (const [re, name] of BILLERS) if (re.test(head)) return name;
     const known = (part) => { const m = part.join('\n').match(STORES); return m ? m[0].replace(/^[^\u0590-\u05FFA-Za-z]+/, '').replace(/\s+/g, ' ').trim() : ''; };
     const top = known(lines.slice(0, 10)); if (top) return top; // a chain name printed in the header
     for (const raw of lines.slice(0, 8)) {
       const l = cleanLine(raw);
       if (/\d+\.\d{2}/.test(l) || TOTAL_WORD.test(l) || DUE_WORD.test(l)) break; // the item list started
-      if (/קבלה|חשבונית|מקור|העתק|עוסק|ח\s*["״.']?\s*פ|ע\s*["״.']\s*מ|טל|פקס|fax|tel|רח['׳]|רחוב|כתובת|www|http|@|\.co|קופה|תאריך|שעה|מס['׳"]|סניף\s*\d|מספר/i.test(l)) continue;
-      const name = l.replace(/בע["״']?מ/g, ' ').replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const l0 = l.replace(/בע\s*["״']?\s*מ/g, ' ');
+      if (/^\s*(?:לכבוד|לקוח|שם\s*ה?לקוח|כמות|תקופ|נכס|שטח)/.test(l0)) continue;
+      if (/קבלה|חשבונית|מקור|העתק|עוסק|(?:^|\s)ח\s*["״.']?\s*פ(?![א-ת])|ע\s*["״.']\s*מ|(?:^|\s)טל(?:פון)?(?![א-ת])|פקס|fax|tel|רח['׳]|רחוב|כתובת|www|http|@|\.co|קופה|תאריך|שעה|מס['׳"]|סניף\s*\d|מספר/i.test(l0)) continue;
+      if (l0 !== l && !/[֐-׿A-Za-z]{3,}/.test(l0)) continue;
+      const name = l0.replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
       const longest = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿A-Za-z]/g) || []).length));
       if (longest >= 3 && name.length <= 40) return name;
     }
     return known(lines.slice(-6)); // some chains print their name only in the footer
   }
   // Returns {name, amount} when the picture looks like a receipt or invoice, otherwise null.
-  function parseReceipt(text) {
-    const lines = String(text || '').split(/\n+/).map(cleanLine).filter(Boolean);
-    if (lines.length < 3) return null;
+  // force: the person said this picture is one bill, so skip the "does it look like one" check.
+  function parseReceipt(text, force) {
+    const lines = String(text || '').split(/\n+/).map(l => cleanLine(l).replace(/[|¦│]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (lines.length < (force ? 1 : 3)) return null;
     const all = lines.join('\n');
     let signs = RECEIPT_SIGNS.filter(re => re.test(all)).length;
     if (lines.filter(l => /\d\.\d{2}(?!\d)/.test(l)).length >= 3) signs++; // prices with agorot are typical of receipts
-    if (signs < 2) return null;
+    if (!force && signs < 2) return null;
     const cands = [];
     lines.forEach((l, i) => {
       let rank = 0;
@@ -1426,8 +1447,9 @@
       const prices = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l)).flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)));
       amount = prices.length ? Math.max(...prices.map(x => x.v)) : null;
     }
+    if (amount == null && force) { const any = lines.flatMap(amountsIn); amount = any.length ? pickAmount(any) : null; }
     if (amount == null) return null;
-    return { name: receiptStore(lines) || 'קבלה', amount };
+    return { name: receiptStore(lines) || 'חשבונית', amount };
   }
   function renderScanRows(rows) {
     const ul = $('scanList'); ul.textContent = '';
@@ -1452,7 +1474,7 @@
     const file = $('scanFile').files && $('scanFile').files[0]; if (!file) return;
     const token = ++scanToken;
     openSheet('scan');
-    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
+    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanOne').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
     $('scanStatus').hidden = false; $('scanStatusText').textContent = 'טוען את כלי הסריקה…'; $('scanProg').style.width = '5%';
     $('saveBtn').disabled = true;
     let worker = null;
@@ -1470,7 +1492,7 @@
       const text = data && data.text, rows = parseScan(text), receipt = parseReceipt(text);
       $('scanStatus').hidden = true;
       if (receipt) {
-        $('scanNote').hidden = false; $('scanNote').textContent = 'זיהיתי קבלה, אז לקחתי רק את הסכום הסופי לתשלום. בדקו את שם החנות והסכום לפני ההוספה.';
+        $('scanNote').hidden = false; $('scanNote').textContent = 'זיהיתי חשבונית או קבלה, אז לקחתי רק את השם ואת הסכום הסופי לתשלום. בדקו אותם לפני ההוספה.';
         renderScanRows([{ name: receipt.name, amount: receipt.amount, on: true }]);
         if (rows.length > 1) {
           $('scanAll').hidden = false;
@@ -1481,6 +1503,21 @@
           };
         }
         return;
+      }
+      const one = parseReceipt(text, true);
+      if (one && rows.length > 1) {
+        $('scanOne').hidden = false;
+        $('scanOne').onclick = () => {
+          $('scanOne').hidden = true; $('scanRecRow').hidden = true;
+          $('scanNote').textContent = 'לקחתי רק את השם ואת הסכום לתשלום. בדקו אותם לפני ההוספה.';
+          renderScanRows([{ name: one.name, amount: one.amount, on: true }]);
+          $('scanAll').hidden = false;
+          $('scanAll').onclick = () => {
+            $('scanAll').hidden = true; $('scanRecRow').hidden = false;
+            $('scanNote').textContent = 'אלה כל השורות שנקראו מהתמונה. סמנו רק את מה שצריך להוסיף.';
+            renderScanRows(rows.map(r => Object.assign({}, r, { on: false })));
+          };
+        };
       }
       if (!rows.length) { $('scanNote').hidden = false; $('scanNote').textContent = 'לא מצאתי בתמונה שורות עם שם וסכום. נסו צילום מסך חד יותר, או תמונה שבה כל הוצאה בשורה משלה.'; return; }
       $('scanNote').hidden = false; $('scanNote').textContent = 'מצאתי ' + rows.length + ' שורות. בדקו ותקנו שמות וסכומים, והורידו את הסימון ממה שלא צריך.';
