@@ -94,7 +94,7 @@
         <div class="hero-amount num" id="remain">0 ₪</div>
         <div class="hero-chips">
           <button class="hchip" id="incomeBtn"><span id="incomeLbl">הוספת הכנסה</span><b class="num" id="incomeAmt"></b></button>
-          <span class="hchip" id="afterChip" hidden><span id="incomeText">יישאר אחרי ההוצאות</span><b class="num" id="balance"></b></span>
+          <button type="button" class="hchip" id="afterChip" hidden><span id="incomeText">יישאר אחרי ההוצאות</span><b class="num" id="balance"></b></button>
         </div>
       </section>
 
@@ -102,6 +102,12 @@
         <section class="progress-card" aria-label="כמה שולם">
           <div class="pc-top"><b class="num" id="ringPct">0%</b><span class="pc-bar"><i id="pcPaid"></i></span></div>
           <div class="pc-legend"><span><i class="dot ok"></i>שולם <b class="num" id="sPaid">0 ₪</b></span><span><i class="dot"></i>סה״כ הוצאות <b class="num" id="sTotal">0 ₪</b></span></div>
+        </section>
+
+        <section class="over-card" id="overCard" hidden aria-labelledby="overTitle">
+          <div class="over-top"><span class="over-ico" aria-hidden="true">⚠️</span><div><b id="overTitle">ממה נוצרה החריגה</b><small id="overSub"></small></div></div>
+          <ul class="over-list" id="overList"></ul>
+          <button type="button" class="link-btn strong" id="overMore">לפירוט המלא</button>
         </section>
 
         <section class="cat-strip" id="catSec" hidden>
@@ -319,6 +325,11 @@
       <div class="t"><b>להוסיף כהוצאות קבועות</b><small>יעברו לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="scanRec" aria-label="הוצאות קבועות"><i></i></label>
     </div>
+  </div>
+  <div class="sgroup" data-for="over" style="display:flex;flex-direction:column;gap:14px">
+    <div class="over-sum" id="ovSum"></div>
+    <div id="ovSrcWrap"><div class="sp-head" id="ovSrcHead">מה גרם לחריגה</div><ul class="over-list" id="ovSrc"></ul></div>
+    <div><div class="sp-head">לאן הלך הכסף החודש</div><ul class="over-cats" id="ovCats"></ul></div>
   </div>
   <div class="sgroup" data-for="cat" style="display:flex;flex-direction:column;gap:12px">
     <div class="cat-preview"><span class="cat-row on" id="cPreview" aria-hidden="true"><span class="cat-ico">🏷️</span><span class="cat-name">שם הקטגוריה</span></span></div>

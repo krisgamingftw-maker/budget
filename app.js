@@ -354,6 +354,7 @@
     renderMonth();
     if (state.tab === 'vGoals') renderGoals();
     if (state.tab === 'vSavings') renderSavings();
+    if (state.sheet && state.sheet.mode === 'over') renderOverSheet();
     if (state.sheet && state.sheet.mode === 'spend') { const it = state.items.find(x => x.id === state.sheet.id); if (it) renderSpendSheet(it); }
     if (state.tab === 'vHistory') renderHistory();
     if (state.tab === 'vSettings') renderSettings();
@@ -418,6 +419,7 @@
       $('carryBtn').disabled = state.busy;
     }
 
+    renderOver(k);
     renderCats(items);
     const shown = state.catFilter ? items.filter(i => catOf(i) === state.catFilter) : items;
     const open = shown.filter(i => !i.paid), done = shown.filter(i => i.paid);
@@ -495,6 +497,96 @@
     };
     return outer;
   }
+
+  // ---------- where an overrun comes from ----------
+  // A month is over when expenses pass the income, or when a budget used in parts
+  // (like groceries) went past its planned amount. The causes are those budgets,
+  // and what grew or is new compared with the month before.
+  const sameItem = (a, b) => (a.seriesId && a.seriesId === b.seriesId) || normName(a.name) === normName(b.name);
+  function overInfo(k) {
+    const { items, total, income } = monthStats(k);
+    const overIncome = income > 0 && total > income ? total - income : 0;
+    const src = [];
+    for (const i of items) {
+      if (!isSplit(i)) continue;
+      const amt = Number(i.amount) || 0, spent = i.spent || 0;
+      if (spent > amt) src.push({ it: i, amount: spent - amt, kind: 'split', text: 'תוכנן ' + fmt(amt) + ', יצא ' + fmt(spent) });
+    }
+    const pk = shiftKey(k, -1), prev = monthItems(pk);
+    if (overIncome && prev.length) {
+      const prevIncome = Number((state.months[pk] || {}).income) || 0;
+      for (const i of items) {
+        const p = prev.find(x => sameItem(x, i));
+        if (!p) { const now = itemTotal(i); if (now > 0) src.push({ it: i, amount: now, kind: 'new', text: 'הוצאה חדשה, לא הייתה ב' + label(pk) }); continue; }
+        // For a budget that went past its plan, the part over the plan is already counted above.
+        const now = isSplit(i) ? Number(i.amount) || 0 : itemTotal(i), was = itemTotal(p);
+        if (now > was) src.push({ it: i, amount: now - was, kind: 'up', text: 'עלתה מ-' + fmt(was) + ' ל-' + fmt(now) + ' לעומת ' + label(pk) });
+      }
+      if (prevIncome > income) src.push({ it: null, amount: prevIncome - income, kind: 'income', text: 'ההכנסה ירדה מ-' + fmt(prevIncome) + ' ל-' + fmt(income) });
+    }
+    src.sort((a, b) => b.amount - a.amount);
+    const splitOver = src.filter(x => x.kind === 'split').reduce((s, x) => s + x.amount, 0);
+    return { items, total, income, overIncome, splitOver, src, on: overIncome > 0 || splitOver > 0 };
+  }
+  function overRow(x) {
+    const li = el('li', 'over-row' + (x.kind === 'income' ? ' inc' : ''));
+    const c = x.it ? CAT_BY[catOf(x.it)] : null;
+    if (c) li.style.setProperty('--cc', CAT_COLOR[c.id]);
+    const b = el(x.it ? 'button' : 'div', 'over-body'); if (x.it) b.type = 'button';
+    const t = el('span', 'over-text');
+    t.append(el('b', '', x.it ? (c ? c.e + ' ' : '') + x.it.name : '💼 הכנסה'), el('small', '', x.text));
+    b.append(t, el('span', 'over-amt num', '+' + fmt(x.amount)));
+    if (x.it) b.onclick = () => openSheet(isSplit(x.it) ? 'spend' : 'edit', x.it);
+    li.append(b); return li;
+  }
+  function overSubText(o) {
+    if (o.overIncome) return 'ההוצאות (' + fmt(o.total) + ') גבוהות מההכנסה (' + fmt(o.income) + ') ב-' + fmt(o.overIncome) + '.';
+    return 'יש תקציבים שעברו את הסכום שתוכנן להם, בסך ' + fmt(o.splitOver) + '.';
+  }
+  function topCats(items) {
+    const by = {};
+    for (const i of items) { const c = catOf(i); by[c] = (by[c] || 0) + itemTotal(i); }
+    return Object.keys(by).filter(id => by[id] > 0).sort((a, b) => by[b] - by[a]).map(id => ({ id, total: by[id] }));
+  }
+  function renderOver(k) {
+    const o = overInfo(k);
+    $('overCard').hidden = !o.on;
+    if (!o.on) return;
+    $('overSub').textContent = overSubText(o);
+    const ul = $('overList'); ul.textContent = '';
+    if (o.src.length) o.src.slice(0, 3).forEach(x => ul.append(overRow(x)));
+    else {
+      // Nothing changed from last month: show the biggest categories instead.
+      for (const c of topCats(o.items).slice(0, 3)) {
+        const cc = CAT_BY[c.id]; const li = el('li', 'over-row'); li.style.setProperty('--cc', CAT_COLOR[c.id]);
+        const b = el('div', 'over-body'); const t = el('span', 'over-text');
+        t.append(el('b', '', cc.e + ' ' + cc.n), el('small', '', Math.round(c.total / (o.total || 1) * 100) + '% מההוצאות'));
+        b.append(t, el('span', 'over-amt num', fmt(c.total))); li.append(b); ul.append(li);
+      }
+    }
+    $('overMore').textContent = o.src.length > 3 ? 'לפירוט המלא (' + o.src.length + ')' : 'לפירוט המלא';
+  }
+  function renderOverSheet() {
+    const o = overInfo(state.view);
+    const sum = $('ovSum'); sum.textContent = '';
+    sum.className = 'over-sum' + (o.on ? ' bad' : '');
+    if (o.overIncome) sum.append(el('span', '', 'חריגה של'), el('b', 'num', fmt(o.overIncome)), el('small', '', 'הוצאות ' + fmt(o.total) + ' · הכנסה ' + fmt(o.income)));
+    else if (o.splitOver) sum.append(el('span', '', 'חריגה מהתקציבים'), el('b', 'num', fmt(o.splitOver)), el('small', '', 'מעבר למה שתוכנן'));
+    else sum.append(el('span', '', 'אין חריגה החודש 🎉'), el('b', 'num', fmt(o.total)), el('small', '', 'סה״כ הוצאות'));
+    $('ovSrcWrap').hidden = !o.src.length;
+    const ul = $('ovSrc'); ul.textContent = ''; o.src.forEach(x => ul.append(overRow(x)));
+    const cl = $('ovCats'); cl.textContent = '';
+    const base = o.income || o.total || 1;
+    for (const c of topCats(o.items)) {
+      const cc = CAT_BY[c.id]; const li = el('li', 'over-cat'); li.style.setProperty('--cc', CAT_COLOR[c.id]);
+      const top = el('div', 'oc-top'); top.append(el('span', '', cc.e + ' ' + cc.n), el('b', 'num', fmt(c.total)));
+      const bar = el('span', 'oc-bar'); const f = el('i'); f.style.width = Math.min(100, c.total / base * 100) + '%'; bar.append(f);
+      li.append(top, bar, el('small', '', Math.round(c.total / base * 100) + '% מ' + (o.income ? 'ההכנסה' : 'ההוצאות')));
+      cl.append(li);
+    }
+  }
+  $('overMore').onclick = () => openSheet('over');
+  $('afterChip').onclick = () => openSheet('over');
 
   function renderCats(items) {
     const box = $('catList'); box.textContent = '';
@@ -871,7 +963,7 @@
   $('incAdd').onclick = () => { const li = incRow(); $('incList').append(li); li.querySelector('.inc-name').focus(); };
   $('fIncome').addEventListener('input', updIncTotal);
 
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat', over: 'over' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
@@ -901,6 +993,7 @@
       $('epPass').value = ''; $('epPass2').value = ''; focus = 'epPass';
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
+    if (mode === 'over') { $('sheetTitle').textContent = (overInfo(state.view).on ? 'ממה נוצרה החריגה ב' : 'ההוצאות ב') + label(state.view); renderOverSheet(); }
     if (mode === 'catNew' || mode === 'catEdit') {
       const c = mode === 'catEdit' ? CAT_BY[obj.id] : null;
       $('sheetTitle').textContent = c ? 'עריכת קטגוריה' : 'קטגוריה חדשה';
@@ -910,6 +1003,7 @@
       syncCatSheet(); focus = 'cName';
     }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
+    $('saveBtn').hidden = mode === 'over'; $('cancelBtn').textContent = mode === 'over' ? 'סגירה' : 'ביטול';
     $('saveBtn').textContent = mode === 'scan' ? 'הוספה' : mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
     $('cancelBtn').hidden = mode === 'recovery';
