@@ -459,6 +459,12 @@ body { padding-block: 0 180px; }
 .newcat input { padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); font-size: 1rem; flex: 1 1 120px; min-width: 0; }
 .newcat input:focus, .newcat-emoji:focus { border-color: var(--accent); outline: none; }
 .newcat .newcat-emoji, #fNewCatEmoji { flex: 0 0 56px; width: 56px; text-align: center; }
+.emoji-pick { height: 44px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); font-size: 1.35rem; padding: 0; cursor: pointer; position: relative; }
+.emoji-pick::after { content: ''; position: absolute; inset-inline-start: 5px; bottom: 5px; border: 4px solid transparent; border-top-color: var(--muted); transform: translateY(3px); }
+.emoji-pick[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.newcat-pop { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1.5px solid var(--line); border-radius: 16px; background: var(--paper); }
+.newcat-pop[hidden] { display: none; }
+.newcat .newcat-own { flex: none; width: 100%; text-align: start; }
 .emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; }
 .emoji-btn { border: 1.5px solid var(--line); background: var(--bg); border-radius: 12px; height: 42px; font-size: 1.25rem; padding: 0; }
 .emoji-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
