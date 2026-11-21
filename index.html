@@ -253,10 +253,15 @@
     <label class="field"><span>על מה</span><input id="fName" placeholder="למשל: חשמל" maxlength="80"></label>
     <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div>
       <div class="newcat" id="fNewCat" hidden>
-        <input id="fNewCatEmoji" class="newcat-emoji" maxlength="8" placeholder="🏷️" aria-label="אימוג'י לקטגוריה">
+        <button type="button" class="newcat-emoji emoji-pick" id="fNewCatEmojiBtn" aria-label="בחירת אימוג'י לקטגוריה" aria-expanded="false" aria-controls="fNewCatEmojis">🏷️</button>
+        <input type="hidden" id="fNewCatEmoji">
         <input id="fNewCatName" maxlength="24" placeholder="שם הקטגוריה" aria-label="שם הקטגוריה החדשה">
         <button type="button" class="btn small" id="fNewCatOk">הוספה</button>
         <button type="button" class="link-btn" id="fNewCatCancel">ביטול</button>
+        <div class="newcat-pop" id="fNewCatEmojis" hidden>
+          <div class="emoji-grid" id="fNewCatGrid"></div>
+          <input id="fNewCatEmojiOwn" class="newcat-own" maxlength="8" placeholder="או הקלידו אימוג'י משלכם" aria-label="אימוג'י משלכם">
+        </div>
       </div>
     </div>
     <div class="switch-row">

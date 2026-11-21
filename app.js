@@ -1250,12 +1250,25 @@
       b.onclick = () => setCat(c.id, false); box.append(b);
     }
     const add = el('button', 'chip chip-add', '＋ קטגוריה חדשה'); add.type = 'button'; add.id = 'fCatAdd';
-    add.onclick = () => { $('fNewCat').hidden = false; $('fNewCatName').value = ''; $('fNewCatEmoji').value = ''; add.hidden = true; $('fNewCatName').focus(); };
+    add.onclick = () => { $('fNewCat').hidden = false; $('fNewCatName').value = ''; setNewCatEmoji(''); showNewCatEmojis(false); add.hidden = true; $('fNewCatName').focus(); };
     box.append(add);
     if (state.cats) renderCatSettings();
   }
   buildCatChips();
-  function closeNewCat() { $('fNewCat').hidden = true; const a = $('fCatAdd'); if (a) a.hidden = false; }
+  // emoji picker of the quick "new category" row in the expense sheet
+  function setNewCatEmoji(e) {
+    e = String(e || '').trim();
+    $('fNewCatEmoji').value = e; $('fNewCatEmojiBtn').textContent = e || '🏷️';
+    document.querySelectorAll('#fNewCatGrid .emoji-btn').forEach(b => b.setAttribute('aria-pressed', b.dataset.e === e ? 'true' : 'false'));
+  }
+  function showNewCatEmojis(on) { $('fNewCatEmojis').hidden = !on; $('fNewCatEmojiBtn').setAttribute('aria-expanded', on ? 'true' : 'false'); if (!on) $('fNewCatEmojiOwn').value = ''; }
+  (function () {
+    const g = $('fNewCatGrid');
+    for (const e of CAT_EMOJIS) { const b = el('button', 'emoji-btn', e); b.type = 'button'; b.dataset.e = e; b.setAttribute('aria-label', e); b.onclick = () => { setNewCatEmoji(e); showNewCatEmojis(false); }; g.append(b); }
+    $('fNewCatEmojiBtn').onclick = () => showNewCatEmojis($('fNewCatEmojis').hidden);
+    $('fNewCatEmojiOwn').addEventListener('input', () => { const v = $('fNewCatEmojiOwn').value.trim(); if (v) { $('fNewCatEmoji').value = v; $('fNewCatEmojiBtn').textContent = v; } });
+  })();
+  function closeNewCat() { showNewCatEmojis(false); $('fNewCat').hidden = true; const a = $('fCatAdd'); if (a) a.hidden = false; }
   // Adds a family category. Returns its id, or null with an error shown.
   function addCustomCat(name, emoji, color, onError) {
     name = String(name || '').trim().replace(/\s+/g, ' ');

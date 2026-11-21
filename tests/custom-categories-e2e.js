@@ -17,7 +17,11 @@ await add('דירה','4000');await add('חשמל','400');
 // 1. add a category from inside the expense sheet
 await A.click('#fab');await w(350);await A.fill('#fAmount','250');await A.fill('#fName','מתנה ליום הולדת של נועה');
 await A.click('#fCatAdd');ok(!(await A.isHidden('#fNewCat')),'inline new category form opens');
-await A.fill('#fNewCatEmoji','🎁');await A.fill('#fNewCatName','מתנות');await A.click('#fNewCatOk');await w(300);
+ok(await A.isHidden('#fNewCatEmojis'),'emoji picker starts closed');
+await A.click('#fNewCatEmojiBtn');await w(200);ok(await A.isVisible('#fNewCatEmojis'),'tapping the emoji opens the picker');
+await A.screenshot({path:'../emoji-picker.png'});
+await A.click('#fNewCatGrid .emoji-btn[data-e="🎁"]');await w(150);
+ok(await A.isHidden('#fNewCatEmojis'),'picker closes after choosing');ok((await A.textContent('#fNewCatEmojiBtn'))==='🎁','chosen emoji shown');await A.fill('#fNewCatName','מתנות');await A.click('#fNewCatOk');await w(300);
 const gid=await A.getAttribute('#fCats [aria-pressed=true]','data-c');ok(gid&&gid.startsWith('c'),'new category is selected: '+gid);
 ok(await A.isHidden('#fNewCat'),'inline form closes');
 await A.screenshot({path:'../custom-cats-sheet.png'});
