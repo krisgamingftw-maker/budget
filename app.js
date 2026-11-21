@@ -11,7 +11,7 @@
   const state = {
     fb: null, auth: null, db: null, user: null,
     hid: null, household: null,
-    items: [], months: {}, goals: [], savings: [],
+    items: [], months: {}, goals: [], savings: [], cats: [],
     loaded: false, unsubs: [],
     tab: 'vMonth', view: todayKey, showPaid: true,
     sheet: null, depositSign: 1, busy: false,
@@ -50,14 +50,30 @@
   }
   ['fAmount', 'fIncome', 'gTarget', 'gStart', 'dAmount', 'svBalance', 'svMonthly', 'sbAmount', 'spAmount'].forEach(id => liveCommas($(id)));
   // ---------- categories ----------
-  const CATS = [
+  const BASE_CATS = [
     { id: 'home', n: 'בית', e: '🏠' }, { id: 'bills', n: 'חשבונות', e: '💡' }, { id: 'food', n: 'אוכל וסופר', e: '🛒' },
     { id: 'car', n: 'רכב ותחבורה', e: '🚗' }, { id: 'health', n: 'בריאות וטיפוח', e: '💊' }, { id: 'kids', n: 'ילדים וחיות', e: '🐾' },
     { id: 'fun', n: 'בזבוזים ופנאי', e: '🎉' }, { id: 'save', n: 'חיסכון', e: '🐷' }, { id: 'misc', n: 'שונות', e: '📦' }
   ];
-  const CAT_COLOR = { home: '#f0ad9a', bills: '#f2c66d', food: '#93cdb0', car: '#94bde3', health: '#e9a3c0', kids: '#c3a7e6', fun: '#f19aae', save: '#7fc9bb', misc: '#c9bdb4' };
-  const CAT_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
-  const CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
+  const BASE_COLOR = { home: '#f0ad9a', bills: '#f2c66d', food: '#93cdb0', car: '#94bde3', health: '#e9a3c0', kids: '#c3a7e6', fun: '#f19aae', save: '#7fc9bb', misc: '#c9bdb4' };
+  const BASE_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
+  // Families can add their own categories. They are shared by everyone in the budget
+  // (collection `cats`) and come after the built-in ones, before "שונות".
+  let CATS = BASE_CATS.slice(), CAT_BY = {}, CAT_COLOR = {}, CAT_SHORT = {};
+  const CUSTOM_COLORS = ['#f4b183', '#a8d5a2', '#9ecbe8', '#d8b4e2', '#f7d08a', '#f2a7b8', '#8fd3c8', '#c4c99a', '#b9b3f0', '#e8b69a'];
+  const CAT_EMOJIS = ['🏷️', '🎁', '🎓', '✈️', '👶', '🐶', '💄', '👗', '🍔', '☕', '🏋️', '📚', '🎮', '💻', '📱', '🧾', '🏥', '🔧', '🌱', '💍', '🕍', '🎂', '🧸', '💸'];
+  function applyCats(custom) {
+    const list = (custom || []).filter(c => c && c.name && !c.locked).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(b.id));
+    const mine = list.map((c, i) => ({ id: c.id, n: String(c.name), e: c.emoji || '🏷️', custom: true, color: c.color || CUSTOM_COLORS[i % CUSTOM_COLORS.length] }));
+    const misc = BASE_CATS[BASE_CATS.length - 1];
+    CATS = BASE_CATS.slice(0, -1).concat(mine, [misc]);
+    CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
+    CAT_COLOR = Object.assign({}, BASE_COLOR); CAT_SHORT = Object.assign({}, BASE_SHORT);
+    mine.forEach(c => { CAT_COLOR[c.id] = c.color; CAT_SHORT[c.id] = c.n; });
+  }
+  applyCats([]);
+  const customCats = () => CATS.filter(c => c.custom);
+  const normName = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const CAT_WORDS = [
     ['save', /חיסכון|חסכון|הפקדה|השתלמות|פיקדון|פקדון|גמל/],
     ['food', /סופר(?![ -]?פארם)|מכולת|שוק|אוכל|ירקות|מאפייה|קצב|רמי לוי|שופרסל|ויקטורי|יוחננוף|אושר עד|חצי חינם|יינות ביתן|טיב טעם|קרפור|am:?pm/i],
@@ -68,7 +84,11 @@
     ['kids', /גן|מעון|צהרון|חוג|ילד|תינוק|חיתול|כלב|חתול|וטרינר|אוכל כלבים|אוכל חתולים/],
     ['fun', /בית קפה|בתי קפה|קפה|מסעד|אוכל בחוץ|וולט|wolt|תן ביס|בילוי|סרט|הופעה|חופשה|טיול|בגדים|קניות|זארה|שופינג|מתנה|אמזון|עלי|shein/i]
   ];
-  function guessCat(name) { const t = String(name || ''); for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
+  function guessCat(name) {
+    const t = String(name || ''), low = normName(t);
+    // An expense whose name contains a family category's name goes there first.
+    for (const c of customCats()) { const n = normName(c.n); if (n.length >= 2 && low.includes(n)) return c.id; }
+    for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
   const catOf = (it) => (it && it.cat && CAT_BY[it.cat]) ? it.cat : (it && it.linkType === 'sav' ? 'save' : guessCat(it && it.name));
 
   function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -109,6 +129,8 @@
   const ITEM_SECRET = ['name', 'amount', 'cat'];
   const savRef = (id) => hh().collection('savings').doc(id);
   const SAV_FIELDS = ['name', 'kind', 'balance', 'monthly', 'endDate'];
+  const catRef = (id) => hh().collection('cats').doc(id);
+  const CAT_SECRET = ['name', 'emoji'];
 
   function failMsg(e) {
     if (e && e.code === 'permission-denied') return 'אין הרשאה לשמור. נסו לצאת ולהיכנס שוב.';
@@ -181,19 +203,21 @@
     if (out.split) out.paid = out.spent >= (Number(out.amount) || 0) && out.spent > 0;
     return out;
   }
-  const raw = { items: [], months: {}, goals: [], savings: [] };
+  const raw = { items: [], months: {}, goals: [], savings: [], cats: [] };
   let decodeRun = 0;
   async function decodeAll() {
     const run = ++decodeRun;
     const items = await Promise.all(raw.items.map(openItem));
     const mk = Object.keys(raw.months); const mv = await Promise.all(mk.map(k => openDoc(raw.months[k])));
     const goals = await Promise.all(raw.goals.map(openGoal));
+    const cats = await Promise.all(raw.cats.map(openDoc));
     const savings = await Promise.all(raw.savings.map(async v => {
       const out = await openDoc(v);
       out.deposits = await Promise.all((Array.isArray(v.deposits) ? v.deposits : []).map(openDoc));
       return out;
     }));
     if (run !== decodeRun) return;
+    state.cats = cats; applyCats(cats); if (state.catFilter && !CAT_BY[state.catFilter]) state.catFilter = null; buildCatChips();
     state.savings = savings;
     state.items = items; state.months = {}; mk.forEach((k, i) => { state.months[k] = mv[i]; }); state.goals = goals;
     render();
@@ -240,6 +264,7 @@
       if (sp) body.deposits = await Promise.all(v.deposits.map(x => x.e ? x : sealAmount(x)));
       writes.push([savRef(v.id), body]);
     }
+    for (const c of raw.cats) { if (!c.e) writes.push([catRef(c.id), await seal({ name: c.name || '', emoji: c.emoji || '' }, CAT_SECRET, true)]); }
     for (let i = 0; i < writes.length; i += 400) { const b = state.db.batch(); writes.slice(i, i + 400).forEach(([r, d]) => b.update(r, d)); await b.commit(); }
     return code;
   }
@@ -329,6 +354,7 @@
     renderMonth();
     if (state.tab === 'vGoals') renderGoals();
     if (state.tab === 'vSavings') renderSavings();
+    if (state.sheet && state.sheet.mode === 'over') renderOverSheet();
     if (state.sheet && state.sheet.mode === 'spend') { const it = state.items.find(x => x.id === state.sheet.id); if (it) renderSpendSheet(it); }
     if (state.tab === 'vHistory') renderHistory();
     if (state.tab === 'vSettings') renderSettings();
@@ -393,6 +419,7 @@
       $('carryBtn').disabled = state.busy;
     }
 
+    renderOver(k);
     renderCats(items);
     const shown = state.catFilter ? items.filter(i => catOf(i) === state.catFilter) : items;
     const open = shown.filter(i => !i.paid), done = shown.filter(i => i.paid);
@@ -470,6 +497,96 @@
     };
     return outer;
   }
+
+  // ---------- where an overrun comes from ----------
+  // A month is over when expenses pass the income, or when a budget used in parts
+  // (like groceries) went past its planned amount. The causes are those budgets,
+  // and what grew or is new compared with the month before.
+  const sameItem = (a, b) => (a.seriesId && a.seriesId === b.seriesId) || normName(a.name) === normName(b.name);
+  function overInfo(k) {
+    const { items, total, income } = monthStats(k);
+    const overIncome = income > 0 && total > income ? total - income : 0;
+    const src = [];
+    for (const i of items) {
+      if (!isSplit(i)) continue;
+      const amt = Number(i.amount) || 0, spent = i.spent || 0;
+      if (spent > amt) src.push({ it: i, amount: spent - amt, kind: 'split', text: 'תוכנן ' + fmt(amt) + ', יצא ' + fmt(spent) });
+    }
+    const pk = shiftKey(k, -1), prev = monthItems(pk);
+    if (overIncome && prev.length) {
+      const prevIncome = Number((state.months[pk] || {}).income) || 0;
+      for (const i of items) {
+        const p = prev.find(x => sameItem(x, i));
+        if (!p) { const now = itemTotal(i); if (now > 0) src.push({ it: i, amount: now, kind: 'new', text: 'הוצאה חדשה, לא הייתה ב' + label(pk) }); continue; }
+        // For a budget that went past its plan, the part over the plan is already counted above.
+        const now = isSplit(i) ? Number(i.amount) || 0 : itemTotal(i), was = itemTotal(p);
+        if (now > was) src.push({ it: i, amount: now - was, kind: 'up', text: 'עלתה מ-' + fmt(was) + ' ל-' + fmt(now) + ' לעומת ' + label(pk) });
+      }
+      if (prevIncome > income) src.push({ it: null, amount: prevIncome - income, kind: 'income', text: 'ההכנסה ירדה מ-' + fmt(prevIncome) + ' ל-' + fmt(income) });
+    }
+    src.sort((a, b) => b.amount - a.amount);
+    const splitOver = src.filter(x => x.kind === 'split').reduce((s, x) => s + x.amount, 0);
+    return { items, total, income, overIncome, splitOver, src, on: overIncome > 0 || splitOver > 0 };
+  }
+  function overRow(x) {
+    const li = el('li', 'over-row' + (x.kind === 'income' ? ' inc' : ''));
+    const c = x.it ? CAT_BY[catOf(x.it)] : null;
+    if (c) li.style.setProperty('--cc', CAT_COLOR[c.id]);
+    const b = el(x.it ? 'button' : 'div', 'over-body'); if (x.it) b.type = 'button';
+    const t = el('span', 'over-text');
+    t.append(el('b', '', x.it ? (c ? c.e + ' ' : '') + x.it.name : '💼 הכנסה'), el('small', '', x.text));
+    b.append(t, el('span', 'over-amt num', '+' + fmt(x.amount)));
+    if (x.it) b.onclick = () => openSheet(isSplit(x.it) ? 'spend' : 'edit', x.it);
+    li.append(b); return li;
+  }
+  function overSubText(o) {
+    if (o.overIncome) return 'ההוצאות (' + fmt(o.total) + ') גבוהות מההכנסה (' + fmt(o.income) + ') ב-' + fmt(o.overIncome) + '.';
+    return 'יש תקציבים שעברו את הסכום שתוכנן להם, בסך ' + fmt(o.splitOver) + '.';
+  }
+  function topCats(items) {
+    const by = {};
+    for (const i of items) { const c = catOf(i); by[c] = (by[c] || 0) + itemTotal(i); }
+    return Object.keys(by).filter(id => by[id] > 0).sort((a, b) => by[b] - by[a]).map(id => ({ id, total: by[id] }));
+  }
+  function renderOver(k) {
+    const o = overInfo(k);
+    $('overCard').hidden = !o.on;
+    if (!o.on) return;
+    $('overSub').textContent = overSubText(o);
+    const ul = $('overList'); ul.textContent = '';
+    if (o.src.length) o.src.slice(0, 3).forEach(x => ul.append(overRow(x)));
+    else {
+      // Nothing changed from last month: show the biggest categories instead.
+      for (const c of topCats(o.items).slice(0, 3)) {
+        const cc = CAT_BY[c.id]; const li = el('li', 'over-row'); li.style.setProperty('--cc', CAT_COLOR[c.id]);
+        const b = el('div', 'over-body'); const t = el('span', 'over-text');
+        t.append(el('b', '', cc.e + ' ' + cc.n), el('small', '', Math.round(c.total / (o.total || 1) * 100) + '% מההוצאות'));
+        b.append(t, el('span', 'over-amt num', fmt(c.total))); li.append(b); ul.append(li);
+      }
+    }
+    $('overMore').textContent = o.src.length > 3 ? 'לפירוט המלא (' + o.src.length + ')' : 'לפירוט המלא';
+  }
+  function renderOverSheet() {
+    const o = overInfo(state.view);
+    const sum = $('ovSum'); sum.textContent = '';
+    sum.className = 'over-sum' + (o.on ? ' bad' : '');
+    if (o.overIncome) sum.append(el('span', '', 'חריגה של'), el('b', 'num', fmt(o.overIncome)), el('small', '', 'הוצאות ' + fmt(o.total) + ' · הכנסה ' + fmt(o.income)));
+    else if (o.splitOver) sum.append(el('span', '', 'חריגה מהתקציבים'), el('b', 'num', fmt(o.splitOver)), el('small', '', 'מעבר למה שתוכנן'));
+    else sum.append(el('span', '', 'אין חריגה החודש 🎉'), el('b', 'num', fmt(o.total)), el('small', '', 'סה״כ הוצאות'));
+    $('ovSrcWrap').hidden = !o.src.length;
+    const ul = $('ovSrc'); ul.textContent = ''; o.src.forEach(x => ul.append(overRow(x)));
+    const cl = $('ovCats'); cl.textContent = '';
+    const base = o.income || o.total || 1;
+    for (const c of topCats(o.items)) {
+      const cc = CAT_BY[c.id]; const li = el('li', 'over-cat'); li.style.setProperty('--cc', CAT_COLOR[c.id]);
+      const top = el('div', 'oc-top'); top.append(el('span', '', cc.e + ' ' + cc.n), el('b', 'num', fmt(c.total)));
+      const bar = el('span', 'oc-bar'); const f = el('i'); f.style.width = Math.min(100, c.total / base * 100) + '%'; bar.append(f);
+      li.append(top, bar, el('small', '', Math.round(c.total / base * 100) + '% מ' + (o.income ? 'ההכנסה' : 'ההוצאות')));
+      cl.append(li);
+    }
+  }
+  $('overMore').onclick = () => openSheet('over');
+  $('afterChip').onclick = () => openSheet('over');
 
   function renderCats(items) {
     const box = $('catList'); box.textContent = '';
@@ -745,13 +862,45 @@
   $('hSearch').addEventListener('input', renderSearch);
 
   // ---------- settings ----------
+  // ---------- family categories (settings + sheet) ----------
+  let catSheetColor = CUSTOM_COLORS[0];
+  function renderCatSettings() {
+    const box = $('setCats'); if (!box) return; box.textContent = '';
+    const mine = customCats();
+    $('setCatsEmpty').hidden = mine.length > 0;
+    for (const c of mine) {
+      const b = el('button', 'chip cat-chip'); b.type = 'button'; b.style.setProperty('--cc', c.color);
+      const ed = el('span', 'ed'); ed.innerHTML = EDIT_SVG; b.append(el('i', 'dot'), c.e + ' ' + c.n, ed);
+      b.setAttribute('aria-label', 'עריכת הקטגוריה ' + c.n);
+      b.onclick = () => openSheet('catEdit', { id: c.id });
+      box.append(b);
+    }
+  }
+  (function buildCatSheet() {
+    const eb = $('cEmojis');
+    for (const e of CAT_EMOJIS) { const b = el('button', 'emoji-btn', e); b.type = 'button'; b.dataset.e = e; b.setAttribute('aria-label', e); b.onclick = () => { $('cEmoji').value = e; syncCatSheet(); }; eb.append(b); }
+    const cb = $('cColors');
+    for (const c of CUSTOM_COLORS) { const b = el('button', 'swatch'); b.type = 'button'; b.dataset.col = c; b.style.background = c; b.setAttribute('aria-label', 'צבע'); b.onclick = () => { catSheetColor = c; syncCatSheet(); }; cb.append(b); }
+    $('cEmoji').addEventListener('input', syncCatSheet);
+    $('cName').addEventListener('input', syncCatSheet);
+  })();
+  function syncCatSheet() {
+    const e = $('cEmoji').value.trim();
+    document.querySelectorAll('#cEmojis .emoji-btn').forEach(b => b.setAttribute('aria-pressed', b.dataset.e === e ? 'true' : 'false'));
+    document.querySelectorAll('#cColors .swatch').forEach(b => b.setAttribute('aria-pressed', b.dataset.col === catSheetColor ? 'true' : 'false'));
+    const pv = $('cPreview'); pv.style.setProperty('--cc', catSheetColor);
+    pv.querySelector('.cat-ico').textContent = e || '🏷️';
+    pv.querySelector('.cat-name').textContent = $('cName').value.trim() || 'שם הקטגוריה';
+  }
+  $('setCatAdd').onclick = () => openSheet('catNew');
+
   function renderSettings() {
     const h = state.household || {};
     $('hhName').textContent = h.name || 'התקציב שלנו';
     const emails = h.emails ? Object.values(h.emails) : [];
     $('hhMembers').textContent = emails.length ? 'משתמשים בתקציב: ' + emails.join(', ') : '';
     $('codeText').textContent = prettyCode(state.hid);
-    renderEncCard();
+    renderEncCard(); renderCatSettings();
     $('whoami').textContent = 'מחוברים בתור ' + ((state.user && state.user.email) || '');
   }
   $('copyCode').onclick = async () => {
@@ -814,13 +963,14 @@
   $('incAdd').onclick = () => { const li = incRow(); $('incList').append(li); li.querySelector('.inc-name').focus(); };
   $('fIncome').addEventListener('input', updIncTotal);
 
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat', over: 'over' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
     sheetError('');
     $('confirmBox').hidden = true; $('sheetActions').hidden = false;
-    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit');
+    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit' || mode === 'catEdit');
+    closeNewCat();
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
     if (mode === 'add') { $('sheetTitle').textContent = 'הוצאה חדשה ב' + label(state.view); $('fName').value = ''; $('fAmount').value = ''; $('fRec').checked = false; $('fSplit').checked = false; fillLink(null); setCat(state.catFilter || null, !state.catFilter); focus = 'fAmount'; }
@@ -843,7 +993,17 @@
       $('epPass').value = ''; $('epPass2').value = ''; focus = 'epPass';
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
+    if (mode === 'over') { $('sheetTitle').textContent = (overInfo(state.view).on ? 'ממה נוצרה החריגה ב' : 'ההוצאות ב') + label(state.view); renderOverSheet(); }
+    if (mode === 'catNew' || mode === 'catEdit') {
+      const c = mode === 'catEdit' ? CAT_BY[obj.id] : null;
+      $('sheetTitle').textContent = c ? 'עריכת קטגוריה' : 'קטגוריה חדשה';
+      $('cName').value = c ? c.n : ''; $('cEmoji').value = c ? c.e : '';
+      const used = new Set(customCats().map(x => x.color));
+      catSheetColor = c ? c.color : (CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[0]);
+      syncCatSheet(); focus = 'cName';
+    }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
+    $('saveBtn').hidden = mode === 'over'; $('cancelBtn').textContent = mode === 'over' ? 'סגירה' : 'ביטול';
     $('saveBtn').textContent = mode === 'scan' ? 'הוספה' : mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
     $('cancelBtn').hidden = mode === 'recovery';
@@ -880,6 +1040,21 @@
       return;
     }
     const FV = firebase.firestore.FieldValue;
+    if (s.mode === 'catNew') {
+      const id = addCustomCat($('cName').value, $('cEmoji').value, catSheetColor, (m) => { sheetError(m); $('cName').focus(); });
+      if (id) { closeSheet(); render(); }
+      return;
+    }
+    if (s.mode === 'catEdit') {
+      const name = $('cName').value.trim().replace(/\s+/g, ' '), emoji = $('cEmoji').value.trim() || '🏷️';
+      if (!name) { sheetError('צריך לכתוב שם לקטגוריה.'); return $('cName').focus(); }
+      if (CATS.some(c => c.id !== s.id && (normName(c.n) === normName(name) || normName(CAT_SHORT[c.id]) === normName(name)))) { sheetError('כבר יש קטגוריה בשם הזה.'); return $('cName').focus(); }
+      const color = catSheetColor;
+      state.cats = (state.cats || []).map(c => c.id === s.id ? Object.assign({}, c, { name, emoji, color }) : c);
+      applyCats(state.cats); buildCatChips(); render();
+      write(async () => catRef(s.id).update(Object.assign(await seal({ name, emoji }, CAT_SECRET, true), { color })));
+      closeSheet(); return;
+    }
     if (s.mode === 'add' || s.mode === 'edit') {
       const name = $('fName').value.trim(); const amtRaw = $('fAmount').value.trim(); const amount = parseAmount(amtRaw);
       if (!amtRaw || !Number.isFinite(amount) || amount < 0) { sheetError('צריך לכתוב סכום, למשל 350.'); return $('fAmount').focus(); }
@@ -907,7 +1082,10 @@
       return closeSheet();
     }
     if (s.mode === 'scan') {
-      const rows = [...$('scanList').querySelectorAll('li')].filter(li => li.querySelector('input[type=checkbox]').checked)
+      const picked = [...$('scanList').querySelectorAll('li')].filter(li => li.querySelector('input[type=checkbox]').checked);
+      const noAmt = picked.find(li => !(parseAmount(li.querySelector('.amt').value) > 0));
+      if (noAmt) { sheetError('חסר סכום. הקלידו את הסכום לתשלום.'); return noAmt.querySelector('.amt').focus(); }
+      const rows = picked
         .map(li => ({ name: li.querySelector('.nm').value.trim(), amount: parseAmount(li.querySelector('.amt').value) }))
         .filter(r => r.name && Number.isFinite(r.amount) && r.amount > 0);
       if (!rows.length) return sheetError('לא נבחרו הוצאות להוספה.');
@@ -1036,8 +1214,10 @@
   $('scrim').onclick = closeSheet;
   $('deleteBtn').onclick = () => {
     const s = state.sheet || {};
-    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : (state.items.find(i => i.id === s.id) || {}).name;
-    $('confirmText').textContent = 'למחוק את "' + (name || '') + '"?';
+    const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : s.mode === 'catEdit' ? (CAT_BY[s.id] || {}).n : (state.items.find(i => i.id === s.id) || {}).name;
+    $('confirmText').textContent = s.mode === 'catEdit'
+      ? 'למחוק את הקטגוריה "' + (name || '') + '"? ההוצאות שבה לא יימחקו, הן יעברו לקטגוריה שמתאימה להן אוטומטית.'
+      : 'למחוק את "' + (name || '') + '"?';
     $('confirmBox').hidden = false; $('sheetActions').hidden = true;
   };
   $('confirmNo').onclick = () => { $('confirmBox').hidden = true; $('sheetActions').hidden = false; };
@@ -1045,6 +1225,12 @@
     const s = state.sheet || {}; if (!s.id) return;
     if (s.mode === 'goalEdit') write(() => goalRef(s.id).delete());
     else if (s.mode === 'savEdit') write(() => savRef(s.id).delete());
+    else if (s.mode === 'catEdit') {
+      state.cats = (state.cats || []).filter(c => c.id !== s.id); applyCats(state.cats);
+      if (state.catFilter === s.id) state.catFilter = null;
+      buildCatChips(); render();
+      write(() => catRef(s.id).delete());
+    }
     else { const it = state.items.find(x => x.id === s.id); if (it) deleteItem(it); }
     closeSheet();
   };
@@ -1055,10 +1241,43 @@
     catAuto = !!auto; pickedCat = id || guessCat($('fName').value);
     document.querySelectorAll('#fCats button').forEach(b => b.setAttribute('aria-pressed', b.dataset.c === pickedCat ? 'true' : 'false'));
   }
-  (function buildCatChips() {
-    const box = $('fCats');
-    for (const c of CATS) { const b = el('button', 'chip', c.e + ' ' + c.n); b.type = 'button'; b.dataset.c = c.id; b.onclick = () => setCat(c.id, false); box.append(b); }
-  })();
+  function buildCatChips() {
+    const box = $('fCats'); box.textContent = '';
+    for (const c of CATS) {
+      const b = el('button', 'chip', c.e + ' ' + c.n); b.type = 'button'; b.dataset.c = c.id;
+      b.setAttribute('aria-pressed', c.id === pickedCat ? 'true' : 'false');
+      if (c.custom) b.style.setProperty('--cc', c.color);
+      b.onclick = () => setCat(c.id, false); box.append(b);
+    }
+    const add = el('button', 'chip chip-add', '＋ קטגוריה חדשה'); add.type = 'button'; add.id = 'fCatAdd';
+    add.onclick = () => { $('fNewCat').hidden = false; $('fNewCatName').value = ''; $('fNewCatEmoji').value = ''; add.hidden = true; $('fNewCatName').focus(); };
+    box.append(add);
+    if (state.cats) renderCatSettings();
+  }
+  buildCatChips();
+  function closeNewCat() { $('fNewCat').hidden = true; const a = $('fCatAdd'); if (a) a.hidden = false; }
+  // Adds a family category. Returns its id, or null with an error shown.
+  function addCustomCat(name, emoji, color, onError) {
+    name = String(name || '').trim().replace(/\s+/g, ' ');
+    emoji = String(emoji || '').trim();
+    if (!name) { onError('צריך לכתוב שם לקטגוריה.'); return null; }
+    if (CATS.some(c => normName(c.n) === normName(name) || normName(CAT_SHORT[c.id]) === normName(name))) { onError('כבר יש קטגוריה בשם הזה.'); return null; }
+    const used = new Set(customCats().map(c => c.color));
+    const doc = { name, emoji: emoji || '🏷️', color: color || CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[customCats().length % CUSTOM_COLORS.length], createdAt: Date.now() };
+    const id = 'c' + rid();
+    // Show it right away; the saved copy replaces it when it syncs.
+    state.cats = (state.cats || []).filter(c => c.id !== id).concat([Object.assign({ id }, doc)]);
+    applyCats(state.cats); buildCatChips();
+    write(async () => catRef(id).set(await seal(doc, CAT_SECRET)));
+    return id;
+  }
+  $('fNewCatOk').onclick = () => {
+    const id = addCustomCat($('fNewCatName').value, $('fNewCatEmoji').value, null, (m) => { sheetError(m); $('fNewCatName').focus(); });
+    if (!id) return;
+    sheetError(''); closeNewCat(); setCat(id, false); render();
+  };
+  $('fNewCatCancel').onclick = () => { sheetError(''); closeNewCat(); };
+  $('fNewCatName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('fNewCatOk').click(); } });
   $('fName').addEventListener('input', () => { if (catAuto) setCat(null, true); });
   $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:')) setCat('save', true); });
   // ---------- scan expenses from a picture (runs on the phone, nothing is uploaded) ----------
@@ -1080,10 +1299,32 @@
       const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cv.width, cv.height);
       const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data; let sum = 0;
       for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; sum += g; }
-      if (sum / (p.length / 4) < 128) for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } // dark mode screenshot
       cx.putImageData(d, 0, 0);
+      const paper = cropPaper(cv, d); if (paper) return paper; // a photo of white paper: never inverted, even in a dim shop
+      if (sum / (p.length / 4) < 128) { for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } cx.putImageData(d, 0, 0); } // dark mode screenshot
       return cv;
     } finally { URL.revokeObjectURL(url); }
+  }
+  // A photo of a receipt held in the hand: cut out the white paper and enlarge it, so the
+  // small print is big enough to read. Screenshots are white edge to edge and stay as they are.
+  function cropPaper(cv, d) {
+    const W = cv.width, H = cv.height, p = d.data;
+    const hist = new Uint32Array(256); for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
+    let acc = 0, p92 = 255; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= 0.92 * W * H) { p92 = v; break; } }
+    const thr = p92 - 25, col = new Float32Array(W), row = new Float32Array(H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (p[(y * W + x) * 4] > thr) { col[x]++; row[y]++; }
+    let x0 = 0, x1 = W - 1, y0 = 0, y1 = H - 1;
+    while (x0 < W && col[x0] / H < 0.15) x0++; while (x1 > x0 && col[x1] / H < 0.15) x1--;
+    while (y0 < H && row[y0] / W < 0.10) y0++; while (y1 > y0 && row[y1] / W < 0.10) y1--;
+    const cw = x1 - x0, ch = y1 - y0;
+    if (cw < W * 0.2 || ch < H * 0.2 || cw > W * 0.85) return null; // no paper found, or it already fills the picture
+    const padX = Math.round(cw * 0.06), padY = Math.round(ch * 0.02);
+    x0 = Math.max(0, x0 - padX); x1 = Math.min(W - 1, x1 + padX); y0 = Math.max(0, y0 - padY); y1 = Math.min(H - 1, y1 + padY);
+    const sw = x1 - x0, sh = y1 - y0, k = Math.min(2.5, 1800 / sw, Math.sqrt(9e6 / (sw * sh)));
+    const out = document.createElement('canvas'); out.width = Math.round(sw * k); out.height = Math.round(sh * k);
+    const ox = out.getContext('2d'); ox.imageSmoothingQuality = 'high'; ox.drawImage(cv, x0, y0, sw, sh, 0, 0, out.width, out.height);
+    out.isPaper = true;
+    return out;
   }
   // Shared clean-up for one line of recognised text: drops direction marks, currency, dates, times, years and card digits.
   const MONTHS_RE = '(?:ינו(?:אר)?|פבר(?:ואר)?|מרץ|מרס|אפר(?:יל)?|מאי|יוני?|יולי?|אוג(?:וסט)?|ספט(?:מבר)?|אוק(?:טובר)?|נוב(?:מבר)?|דצמ(?:בר)?|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z׳\']*';
@@ -1149,11 +1390,27 @@
     /תודה\s*(ש|ו|על|רבה)|להתראות|thank/i,
     /ברקוד|אסמכתא|מס['׳"]?\s*עסקה|שובר|עסקה|הנפק|מקור|העתק/i,
     /כמות|מחיר\s*ליח|יח['׳]|qty|price/i,
+    // bills: electricity, water, phone, internet, arnona, insurance
+    /חשבון\s*(?:חשמל|מים|גז|תקופתי|טלפון|סלולר)|תקופת\s*(?:ה?חשבון|ה?חיוב)|חיוב\s*(?:לתקופה|תקופתי)|מספר\s*(?:לקוח|מנוי|חוזה|צרכן|משלם|חשבון)|הוראת\s*קבע|מועד\s*(?:ה?חיוב|ה?תשלום)|ארנונה|קוט["״']?ש|הודעת\s*תשלום|דמי\s*מנוי|פוליסה|פרמיה/i,
+  ];
+  // Bill senders, shown by the expense they stand for.
+  const BILLERS = [
+    [/חברת\s*ה?חשמל|\biec\b|חשבון\s*חשמל|אלקטרה\s*פאוור|סלקום\s*אנרגיה|פזאנרגיה|אמישראגז\s*חשמל/i, 'חשמל'],
+    [/ארנונה/i, 'ארנונה'],
+    [/(?:^|\s)מי\s+[א-ת]|תאגיד\s*(?:ה)?מים|חשבון\s*מים|מקורות|מים\s*וביוב|מי\s*אביבים|הגיחון|מי\s*רעננה|מי\s*שבע|מי\s*כרמל|מי\s*נתניה|מי\s*הרצליה|מי\s*ציונה|מי\s*מודיעין|מי\s*רמת\s*גן|מי\s*לוד|עין\s*אפק|יובלים|פלג\s*הגליל|מי\s*גבעתיים|מי\s*ראשון|מניב\s*ראשון|מי\s*עדן|מי\s*נעם|מיתר|הרי\s*נצרת|מי\s*הוד\s*השרון|מי\s*כפר\s*סבא|מי\s*אשקלון|מי\s*אשדוד|מי\s*יבנה|מי\s*בת\s*ים|מי\s*חולון|מי\s*פתח\s*תקווה|מי\s*בני\s*ברק|מי\s*רחובות/i, 'מים'],
+    [/סופרגז|אמישראגז|פזגז|דור\s*גז|חשבון\s*גז/i, 'גז'],
+    [/בזק\s*בינלאומי/i, 'בזק בינלאומי'], [/בזק/i, 'בזק'], [/הוט\s*מובייל|hot\s*mobile/i, 'הוט מובייל'], [/(?:^|[^א-ת])הוט(?![א-ת])|\bhot\b/i, 'הוט'],
+    [/פרטנר|partner/i, 'פרטנר'], [/סלקום|cellcom/i, 'סלקום'], [/פלאפון|pelephone/i, 'פלאפון'], [/גולן\s*טלקום|golan/i, 'גולן טלקום'],
+    [/\byes\b|(?:^|[^א-ת])יס(?![א-ת])/i, 'yes'], [/we4g|רמי\s*לוי\s*תקשורת/i, 'רמי לוי תקשורת'], [/012\s*מובייל|xphone/i, '012 מובייל'], [/019/i, '019'],
+    [/נטפליקס|netflix/i, 'נטפליקס'], [/ספוטיפיי|spotify/i, 'ספוטיפיי'],
+    [/ביטוח\s*לאומי/i, 'ביטוח לאומי'], [/מכבי/i, 'מכבי'], [/כללית/i, 'כללית'], [/מאוחדת/i, 'מאוחדת'], [/לאומית/i, 'לאומית'],
+    [/ועד\s*ה?בית/i, 'ועד בית'],
   ];
   const STORES = WORD('שופרסל|רמי\\s*לוי|ויקטורי|יוחננוף|אושר\\s*עד|חצי\\s*חינם|יינות\\s*ביתן|טיב\\s*טעם|מגה\\s*בעיר|קרפור|carrefour|סופר\\s*יודה|מחסני\\s*השוק|פרש\\s*מרקט|am:?pm|סופר[\\s-]*פארם|super[\\s-]*pharm|גוד\\s*פארם|be\\s*פארם|ניו\\s*פארם|איקאה|ikea|ace|הום\\s*סנטר|ksp|באג|מחסני\\s*חשמל|זארה|zara|h&m|קסטרו|castro|פוקס|fox|גולף|רנואר|ארומה|aroma|קפה\\s*קפה|לנדוור|מקדונלד|mcdonald|בורגר\\s*קינג|burger\\s*king|דומינו|פיצה\\s*האט|פז|paz|סונול|sonol|דור\\s*אלון|delek|דלק|ten|yellow|יילו|אלונית|נייס|wolt|וולט|ביתילי|עליאקספרס|aliexpress|amazon|אמזון|shein');
   // The final amount: prefers "סה"כ לתשלום" / "לתשלום", then a plain "סה"כ", then the card payment line.
   function amountsIn(str) {
-    const fixed = str.replace(/(\d)\s*,\s*(\d{2})(?!\d)/g, '$1.$2').replace(/(\d)\s+\.\s*(\d{2})(?!\d)|(\d)\.\s+(\d{2})(?!\d)/g, (m, a, b, c, d) => (a || c) + '.' + (b || d)); // 123,40 / 123 .40 → 123.40
+    const fixed = str.replace(/(^|[^\d.,])(\d{2})\s+\.(\d{3,})(?!\d)/g, '$1$3.$2') // read right to left: "45 .186" is 186.45
+      .replace(/(\d)\s*,\s*(\d{2})(?!\d)/g, '$1.$2').replace(/(\d)\s+\.\s*(\d{2})(?!\d)|(\d)\.\s+(\d{2})(?!\d)/g, (m, a, b, c, d) => (a || c) + '.' + (b || d)); // 123,40 / 123 .40 → 123.40
     return (stripDates(fixed).match(NUM_RE) || []).map(n => ({ n, v: Number(n.replace(/,/g, '')) }))
       .filter(x => x.v > 0 && x.v < 100000 && !(x.v >= 1000 && !/[.,]/.test(x.n) && x.n.length > 5));
   }
@@ -1164,26 +1421,35 @@
     return pool.reduce((a, b) => (b.v > a.v ? b : a)).v;
   }
   function receiptStore(lines) {
+    const head = lines.slice(0, 12).join('\n');
+    for (const [re, name] of BILLERS) if (re.test(head)) return name;
     const known = (part) => { const m = part.join('\n').match(STORES); return m ? m[0].replace(/^[^\u0590-\u05FFA-Za-z]+/, '').replace(/\s+/g, ' ').trim() : ''; };
     const top = known(lines.slice(0, 10)); if (top) return top; // a chain name printed in the header
     for (const raw of lines.slice(0, 8)) {
       const l = cleanLine(raw);
       if (/\d+\.\d{2}/.test(l) || TOTAL_WORD.test(l) || DUE_WORD.test(l)) break; // the item list started
-      if (/קבלה|חשבונית|מקור|העתק|עוסק|ח\s*["״.']?\s*פ|ע\s*["״.']\s*מ|טל|פקס|fax|tel|רח['׳]|רחוב|כתובת|www|http|@|\.co|קופה|תאריך|שעה|מס['׳"]|סניף\s*\d|מספר/i.test(l)) continue;
-      const name = l.replace(/בע["״']?מ/g, ' ').replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const l0 = l.replace(/בע\s*["״']?\s*מ/g, ' ');
+      if (/^\s*(?:לכבוד|לקוח|שם\s*ה?לקוח|כמות|תקופ|נכס|שטח)/.test(l0)) continue;
+      if (/קבלה|חשבונית|מקור|העתק|עוסק|(?:^|\s)ח\s*["״.']?\s*פ(?![א-ת])|ע\s*["״.']\s*מ|(?:^|\s)טל(?:פון)?(?![א-ת])|פקס|fax|tel|רח['׳]|רחוב|כתובת|www|http|@|\.co|קופה|תאריך|שעה|מס['׳"]|סניף\s*\d|מספר/i.test(l0)) continue;
+      if (l0 !== l && !/[֐-׿A-Za-z]{3,}/.test(l0)) continue;
+      const name = l0.replace(/[^֐-׿A-Za-z\s&'-]/g, ' ').replace(/\s+/g, ' ').trim();
       const longest = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿A-Za-z]/g) || []).length));
-      if (longest >= 3 && name.length <= 40) return name;
+      const heb = Math.max(0, ...name.split(' ').map(w => (w.match(/[֐-׿]/g) || []).length));
+      if (longest >= 3 && name.length <= 40 && heb >= 3) return name.split(' ').filter(w => !/^[A-Za-z]{1,3}$/.test(w)).join(' ');
     }
     return known(lines.slice(-6)); // some chains print their name only in the footer
   }
   // Returns {name, amount} when the picture looks like a receipt or invoice, otherwise null.
-  function parseReceipt(text) {
-    const lines = String(text || '').split(/\n+/).map(cleanLine).filter(Boolean);
-    if (lines.length < 3) return null;
+  // force: the person said this picture is one bill, so skip the "does it look like one" check.
+  function parseReceipt(text, force) {
+    const lines = String(text || '').split(/\n+/).map(l => cleanLine(l).replace(/[|¦│]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (lines.length < (force ? 1 : 3)) return null;
     const all = lines.join('\n');
     let signs = RECEIPT_SIGNS.filter(re => re.test(all)).length;
     if (lines.filter(l => /\d\.\d{2}(?!\d)/.test(l)).length >= 3) signs++; // prices with agorot are typical of receipts
-    if (signs < 2) return null;
+    if (lines.filter(l => /(?:^|\D)\d{12,13}(?!\d)/.test(l)).length >= 2) signs++; // product barcodes
+    if (lines.filter(l => /(?:^|[\s=])[-–]\s?\d+[.,]\d{2}(?!\d)/.test(l)).length >= 2) signs++; // discounts
+    if (!force && signs < 2) return null;
     const cands = [];
     lines.forEach((l, i) => {
       let rank = 0;
@@ -1207,11 +1473,18 @@
       amount = cands.filter(c => c.rank === top).pop().amount; // the last one is the final total
     } else {
       // no label was read: the biggest price on the receipt is almost always the total
-      const prices = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l)).flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)));
-      amount = prices.length ? Math.max(...prices.map(x => x.v)) : null;
+      // no label was read: trust the biggest price only when it stands on its own line or shows up twice
+      // (the total is printed by itself and again next to the payment); otherwise leave it for the person to type.
+      const ok = lines.filter(l => !NOT_TOTAL.test(l) && !/מזומן|cash/i.test(l));
+      const prices = ok.flatMap(l => amountsIn(l).filter(x => /\.\d{2}$/.test(x.n)).map(x => Object.assign(x, { alone: !/[֐-׿A-Za-z]{2,}/.test(l) })));
+      const top = prices.length ? Math.max(...prices.map(x => x.v)) : null;
+      const sure = top != null && (prices.filter(x => x.v === top).length >= 2 || prices.some(x => x.v === top && x.alone));
+      amount = sure ? top : null;
+      if (amount == null && !force) return { name: receiptStore(lines) || 'קבלה', amount: null };
     }
+    if (amount == null && force) { const any = lines.flatMap(amountsIn); amount = any.length ? pickAmount(any) : null; }
     if (amount == null) return null;
-    return { name: receiptStore(lines) || 'קבלה', amount };
+    return { name: receiptStore(lines) || 'חשבונית', amount };
   }
   function renderScanRows(rows) {
     const ul = $('scanList'); ul.textContent = '';
@@ -1220,7 +1493,7 @@
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = r.on; cb.setAttribute('aria-label', 'להוסיף את ' + r.name);
       cb.onchange = () => { li.classList.toggle('off', !cb.checked); updateScanCount(); };
       const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'nm'; nm.value = r.name; nm.maxLength = 80;
-      const am = document.createElement('input'); am.type = 'text'; am.className = 'amt num'; am.inputMode = 'decimal'; am.value = groupNum(r.amount);
+      const am = document.createElement('input'); am.type = 'text'; am.className = 'amt num'; am.inputMode = 'decimal'; am.value = r.amount == null ? '' : groupNum(r.amount); am.placeholder = 'סכום';
       am.addEventListener('input', () => { am.value = groupNum(am.value); });
       li.append(cb, nm, am); ul.append(li);
     }
@@ -1236,7 +1509,7 @@
     const file = $('scanFile').files && $('scanFile').files[0]; if (!file) return;
     const token = ++scanToken;
     openSheet('scan');
-    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
+    $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanOne').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
     $('scanStatus').hidden = false; $('scanStatusText').textContent = 'טוען את כלי הסריקה…'; $('scanProg').style.width = '5%';
     $('saveBtn').disabled = true;
     let worker = null;
@@ -1249,13 +1522,18 @@
         if (m.status === 'recognizing text') { $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * 80) + '%'; }
         else if (/load|initializ/.test(m.status || '')) { $('scanStatusText').textContent = 'מכין את הסריקה…'; $('scanProg').style.width = (5 + (m.progress || 0) * 15) + '%'; }
       } });
+      if (canvas.isPaper && worker.setParameters) await worker.setParameters({ tessedit_pageseg_mode: '6' }); // one block of text reads a receipt photo best
       const { data } = await worker.recognize(canvas);
       if (token !== scanToken) return;
       const text = data && data.text, rows = parseScan(text), receipt = parseReceipt(text);
       $('scanStatus').hidden = true;
       if (receipt) {
-        $('scanNote').hidden = false; $('scanNote').textContent = 'זיהיתי קבלה, אז לקחתי רק את הסכום הסופי לתשלום. בדקו את שם החנות והסכום לפני ההוספה.';
+        $('scanNote').hidden = false;
+        $('scanNote').textContent = receipt.amount == null
+          ? 'זיהיתי קבלה, אבל לא הצלחתי לקרוא בה את הסכום לתשלום. הקלידו אותו כאן. בפעם הבאה כדאי לצלם את הקבלה ישר ומקרוב, כך שתמלא את רוב התמונה.'
+          : 'זיהיתי חשבונית או קבלה, אז לקחתי רק את השם ואת הסכום הסופי לתשלום. בדקו אותם לפני ההוספה.';
         renderScanRows([{ name: receipt.name, amount: receipt.amount, on: true }]);
+        if (receipt.amount == null) setTimeout(() => { const a = $('scanList').querySelector('.amt'); if (a) a.focus(); }, 50);
         if (rows.length > 1) {
           $('scanAll').hidden = false;
           $('scanAll').onclick = () => {
@@ -1265,6 +1543,21 @@
           };
         }
         return;
+      }
+      const one = parseReceipt(text, true);
+      if (one && rows.length > 1) {
+        $('scanOne').hidden = false;
+        $('scanOne').onclick = () => {
+          $('scanOne').hidden = true; $('scanRecRow').hidden = true;
+          $('scanNote').textContent = 'לקחתי רק את השם ואת הסכום לתשלום. בדקו אותם לפני ההוספה.';
+          renderScanRows([{ name: one.name, amount: one.amount, on: true }]);
+          $('scanAll').hidden = false;
+          $('scanAll').onclick = () => {
+            $('scanAll').hidden = true; $('scanRecRow').hidden = false;
+            $('scanNote').textContent = 'אלה כל השורות שנקראו מהתמונה. סמנו רק את מה שצריך להוסיף.';
+            renderScanRows(rows.map(r => Object.assign({}, r, { on: false })));
+          };
+        };
       }
       if (!rows.length) { $('scanNote').hidden = false; $('scanNote').textContent = 'לא מצאתי בתמונה שורות עם שם וסכום. נסו צילום מסך חד יותר, או תמונה שבה כל הוצאה בשורה משלה.'; return; }
       $('scanNote').hidden = false; $('scanNote').textContent = 'מצאתי ' + rows.length + ' שורות. בדקו ותקנו שמות וסכומים, והורידו את הסימון ממה שלא צריך.';
@@ -1507,8 +1800,8 @@
   function stopListening() { state.unsubs.forEach(f => { try { f(); } catch (e) {} }); state.unsubs = []; }
   function openHousehold(hid) {
     stopListening();
-    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = []; raw.savings = [];
-    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = []; state.savings = [];
+    state.hid = hid; state.loaded = false; state.key = null; decCache.clear(); raw.items = []; raw.months = {}; raw.goals = []; raw.savings = []; raw.cats = [];
+    try { localStorage.setItem('budget-hid-' + state.user.uid, hid); } catch (e) {} state.items = []; state.months = {}; state.goals = []; state.savings = []; state.cats = []; state.catFilter = null; applyCats([]);
     show('loading');
     const db = state.db; const base = db.collection('households').doc(hid);
     let got = { items: false, months: false };
@@ -1537,6 +1830,10 @@
     }, onErr));
     state.unsubs.push(base.collection('savings').onSnapshot(snap => {
       raw.savings = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      decodeAll();
+    }, onErr));
+    state.unsubs.push(base.collection('cats').onSnapshot(snap => {
+      raw.cats = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
       decodeAll();
     }, onErr));
     state.unsubs.push(base.collection('goals').onSnapshot(snap => {

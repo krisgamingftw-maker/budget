@@ -94,7 +94,7 @@
         <div class="hero-amount num" id="remain">0 ₪</div>
         <div class="hero-chips">
           <button class="hchip" id="incomeBtn"><span id="incomeLbl">הוספת הכנסה</span><b class="num" id="incomeAmt"></b></button>
-          <span class="hchip" id="afterChip" hidden><span id="incomeText">יישאר אחרי ההוצאות</span><b class="num" id="balance"></b></span>
+          <button type="button" class="hchip" id="afterChip" hidden><span id="incomeText">יישאר אחרי ההוצאות</span><b class="num" id="balance"></b></button>
         </div>
       </section>
 
@@ -102,6 +102,12 @@
         <section class="progress-card" aria-label="כמה שולם">
           <div class="pc-top"><b class="num" id="ringPct">0%</b><span class="pc-bar"><i id="pcPaid"></i></span></div>
           <div class="pc-legend"><span><i class="dot ok"></i>שולם <b class="num" id="sPaid">0 ₪</b></span><span><i class="dot"></i>סה״כ הוצאות <b class="num" id="sTotal">0 ₪</b></span></div>
+        </section>
+
+        <section class="over-card" id="overCard" hidden aria-labelledby="overTitle">
+          <div class="over-top"><span class="over-ico" aria-hidden="true">⚠️</span><div><b id="overTitle">ממה נוצרה החריגה</b><small id="overSub"></small></div></div>
+          <ul class="over-list" id="overList"></ul>
+          <button type="button" class="link-btn strong" id="overMore">לפירוט המלא</button>
         </section>
 
         <section class="cat-strip" id="catSec" hidden>
@@ -182,6 +188,13 @@
           <p>אם כל אחד מכם פתח תקציב נפרד, אחד מכם מקליד כאן את הקוד של השני ועובר לתקציב המשותף.</p>
           <div><button class="btn ghost small" id="joinOtherBtn">הצטרפות עם קוד</button></div>
         </div>
+        <div class="card" id="catCard">
+          <h2>קטגוריות</h2>
+          <p>הקטגוריות שתוסיפו כאן משותפות לכל המשפחה, ואפשר לבחור אותן בכל הוצאה. לחיצה על קטגוריה פותחת עריכה.</p>
+          <div class="chips" id="setCats"></div>
+          <p id="setCatsEmpty" style="font-size:.85rem">עדיין לא הוספתם קטגוריות משלכם.</p>
+          <div><button class="btn ghost small" id="setCatAdd">הוספת קטגוריה</button></div>
+        </div>
         <div class="card" id="encCard">
           <h2 id="encTitle">הצפנת הנתונים</h2>
           <p id="encText"></p>
@@ -238,7 +251,14 @@
     <input type="file" id="scanFile" accept="image/*" hidden>
     <label class="field"><span>סכום ₪</span><input id="fAmount" class="num amount-input" inputmode="decimal" placeholder="0"></label>
     <label class="field"><span>על מה</span><input id="fName" placeholder="למשל: חשמל" maxlength="80"></label>
-    <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div></div>
+    <div class="field"><span>קטגוריה</span><div class="chips" id="fCats"></div>
+      <div class="newcat" id="fNewCat" hidden>
+        <input id="fNewCatEmoji" class="newcat-emoji" maxlength="8" placeholder="🏷️" aria-label="אימוג'י לקטגוריה">
+        <input id="fNewCatName" maxlength="24" placeholder="שם הקטגוריה" aria-label="שם הקטגוריה החדשה">
+        <button type="button" class="btn small" id="fNewCatOk">הוספה</button>
+        <button type="button" class="link-btn" id="fNewCatCancel">ביטול</button>
+      </div>
+    </div>
     <div class="switch-row">
       <div class="t"><b>הוצאה קבועה</b><small>תעבור לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="fRec" aria-label="הוצאה קבועה"><i></i></label>
@@ -299,12 +319,25 @@
   <div class="sgroup" data-for="scan" style="display:flex;flex-direction:column;gap:12px">
     <div class="scan-status" id="scanStatus"><span id="scanStatusText">קורא את התמונה…</span><span class="scan-prog"><i id="scanProg"></i></span></div>
     <p class="sheet-note" id="scanNote" hidden></p>
-    <button type="button" class="link-btn" id="scanAll" hidden style="align-self:flex-start">להציג את כל השורות שנקראו מהקבלה</button>
+    <button type="button" class="link-btn" id="scanAll" hidden style="align-self:flex-start">להציג את כל השורות שנקראו</button>
+    <button type="button" class="scan-one" id="scanOne" hidden>🧾 זו חשבונית אחת? לקחת רק את השם והסכום לתשלום</button>
     <ul class="scan-list" id="scanList"></ul>
     <div class="switch-row" id="scanRecRow" hidden>
       <div class="t"><b>להוסיף כהוצאות קבועות</b><small>יעברו לחודש הבא בלחיצה</small></div>
       <label class="switch"><input type="checkbox" id="scanRec" aria-label="הוצאות קבועות"><i></i></label>
     </div>
+  </div>
+  <div class="sgroup" data-for="over" style="display:flex;flex-direction:column;gap:14px">
+    <div class="over-sum" id="ovSum"></div>
+    <div id="ovSrcWrap"><div class="sp-head" id="ovSrcHead">מה גרם לחריגה</div><ul class="over-list" id="ovSrc"></ul></div>
+    <div><div class="sp-head">לאן הלך הכסף החודש</div><ul class="over-cats" id="ovCats"></ul></div>
+  </div>
+  <div class="sgroup" data-for="cat" style="display:flex;flex-direction:column;gap:12px">
+    <div class="cat-preview"><span class="cat-row on" id="cPreview" aria-hidden="true"><span class="cat-ico">🏷️</span><span class="cat-name">שם הקטגוריה</span></span></div>
+    <label class="field"><span>שם הקטגוריה</span><input id="cName" maxlength="24" placeholder="למשל: מתנות"></label>
+    <div class="field"><span>אימוג'י</span><div class="emoji-grid" id="cEmojis"></div>
+      <input id="cEmoji" class="newcat-emoji" maxlength="8" placeholder="או הקלידו אחד משלכם" aria-label="אימוג'י משלכם" style="width:100%;text-align:start"></div>
+    <div class="field"><span>צבע</span><div class="palette" id="cColors" style="justify-content:flex-start;flex-wrap:wrap"></div></div>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>
