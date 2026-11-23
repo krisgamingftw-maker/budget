@@ -79,6 +79,6 @@ rows=await scan('../bank-leumi.png');
 ok(!rows.some(r=>/ישראלי|45,678|יתרה|9,8|נוב/.test(r.join(' '))),'leumi: no account holder, account number, balance or month in the list');
 const spent=leumi.filter(x=>x[4]==='-');
 ok(rows.filter(r=>r[0]).length===spent.length&&spent.every(x=>rows.some(r=>r[0]&&r[1].startsWith(x[2].replace(':',''))&&r[2]===x[5])),'leumi: each expense ticked with its own name and amount');
-ok(rows.some(r=>!r[0]&&r[2]==='1,240.5'),'leumi: money coming in (+) shown but not ticked');
+ok(rows.length===spent.length&&!rows.some(r=>/אלפא|זיכוי|1,240/.test(r.join(' '))),'leumi: money coming in (+) is left out');
 await A.click('#cancelBtn');await w(400);
 console.log(fail?fail+' FAILED':'ALL PASSED');await b.close();srv.close();process.exit(fail?1:0)});

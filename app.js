@@ -1778,7 +1778,8 @@
     for (const r of rows) {
       if (!r.name || !nameOk(r.name) || r.amount == null) continue; // an amount with no shop beside it
       if (list && (r.head || (!r.dated && (r.y < first || r.y > last)))) continue; // a bank page: skip the header (card number, next charge, "as of")
-      out.push({ name: r.name, amount: r.amount, on: !r.head && !r.credit }); // money coming in (+) is shown, not ticked
+      if (r.credit) continue; // money coming in (+ on a bank page) is not an expense
+      out.push({ name: r.name, amount: r.amount, on: !r.head });
     }
     out.list = list;
     return out;
