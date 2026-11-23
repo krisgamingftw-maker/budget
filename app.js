@@ -195,7 +195,7 @@
     return out;
   }
   // Items used in parts (like groceries) keep a list of purchases.
-  const sealAmount = async (x) => ({ id: x.id || rid(), at: x.at || Date.now(), e: await aesEnc(state.key, te.encode(JSON.stringify({ amount: Number(x.amount) || 0 }))) });
+  const sealAmount = async (x) => ({ id: x.id || rid(), at: x.at || Date.now(), e: await aesEnc(state.key, te.encode(JSON.stringify(x.name ? { amount: Number(x.amount) || 0, name: x.name } : { amount: Number(x.amount) || 0 }))) });
   async function openItem(d) {
     const out = await openDoc(d);
     if (!d || !Array.isArray(d.spends)) return out;
@@ -458,6 +458,9 @@
       mids: rects.map(r => r.top + sy + r.height / 2),
       // a little past the first and last rows, so the ends are always reachable
       minDy: rects[0].top - rects[from].top - rects[0].height / 2, maxDy: rects[rows.length - 1].bottom - rects[from].bottom + rects[rows.length - 1].height / 2,
+      hs: rects.map(r => r.height), shift: rows.map(() => 0), over: -1,
+      // a plain expense can be dropped onto a budget used in parts (like groceries) to become one of its purchases
+      canMerge: li.dataset.mergeable === '1',
       raf: 0, pending: false
     };
     ul.classList.add('sorting'); li.classList.add('dragging');
@@ -468,14 +471,25 @@
     const d = drag;
     const dy = Math.max(d.minDy, Math.min(d.maxDy, d.y + window.scrollY - d.y0 - d.sy0));
     const mid = d.mids[d.from] + dy;
+    // Held over the middle of a budget used in parts: that budget lights up and the order stays as it is.
+    let over = -1;
+    if (d.canMerge) d.rows.forEach((r, i) => { if (i !== d.from && r.dataset.split === '1' && Math.abs(mid - (d.mids[i] + d.shift[i])) < d.hs[i] * 0.3) over = i; });
+    if (over !== d.over) {
+      if (d.over >= 0) d.rows[d.over].classList.remove('merge-target');
+      if (over >= 0) { d.rows[over].classList.add('merge-target'); try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
+      d.li.classList.toggle('merging', over >= 0);
+      d.over = over;
+    }
+    d.li.style.transform = 'translateY(' + dy + 'px)';
+    if (over >= 0) return;
     let to = d.from;
     for (let i = d.from + 1; i < d.rows.length; i++) if (mid >= d.mids[i]) to = i;
     for (let i = d.from - 1; i >= 0; i--) if (mid <= d.mids[i]) to = i;
     d.to = to;
-    d.li.style.transform = 'translateY(' + dy + 'px)';
     d.rows.forEach((r, i) => {
       if (i === d.from) return;
       const sh = d.from < i && i <= to ? -d.h : to <= i && i < d.from ? d.h : 0;
+      d.shift[i] = sh;
       r.style.transform = sh ? 'translateY(' + sh + 'px)' : '';
     });
   }
@@ -495,10 +509,27 @@
     const d = drag; if (!d) return;
     cancelAnimationFrame(d.raf);
     if (commit) placeDrag();
+    if (d.over >= 0) {
+      const tgt = d.rows[d.over];
+      if (!commit) {
+        tgt.classList.remove('merge-target');
+      } else {
+        // The expense sinks into the budget, then the list is drawn again without it.
+        d.li.classList.add('dropping', 'merged');
+        d.rows.forEach((r, i) => { if (i !== d.from) r.style.transform = d.shift[i] ? 'translateY(' + d.shift[i] + 'px)' : ''; });
+        setTimeout(() => {
+          d.rows.forEach(r => { r.style.transform = ''; }); tgt.classList.remove('merge-target');
+          d.ul.classList.remove('sorting'); d.li.classList.remove('dragging', 'dropping', 'merging', 'merged');
+          drag = null;
+          mergeInto(d.li.dataset.id, tgt.dataset.id);
+        }, 200);
+        return;
+      }
+    }
     const moved = commit && d.to !== d.from;
     const finish = () => {
       d.rows.forEach(r => { r.style.transform = ''; });
-      d.ul.classList.remove('sorting'); d.li.classList.remove('dragging', 'dropping');
+      d.ul.classList.remove('sorting'); d.li.classList.remove('dragging', 'dropping', 'merging');
       drag = null;
       if (moved) moveItem(d.li.dataset.id, d.rows[d.to].dataset.id, d.to > d.from);
       else if (d.pending) render();
@@ -511,6 +542,51 @@
     d.li.classList.add('dropping'); d.li.style.transform = 'translateY(' + target + 'px)';
     setTimeout(finish, 180);
   }
+  // A plain expense dropped onto a budget used in parts becomes one of its purchases
+  // (with its name), and leaves the list. "ביטול" puts it back as it was.
+  const canMergeItem = (it) => !isSplit(it) && !it.linkId && !it.locked && (Number(it.amount) || 0) > 0;
+  function mergeInto(srcId, splitId) {
+    const src = state.items.find(x => x.id === srcId), sp = state.items.find(x => x.id === splitId);
+    const rawSrc = raw.items.find(x => x.id === srcId), rawSp = raw.items.find(x => x.id === splitId);
+    if (!src || !sp || !rawSrc || !rawSp || !canMergeItem(src) || !isSplit(sp)) { render(); return; }
+    const amount = Number(src.amount) || 0;
+    const entry = { id: rid(), amount, at: Date.now(), name: src.name };
+    const before = state.items;
+    state.items = state.items.filter(x => x.id !== srcId).map(x => x.id === splitId ? Object.assign({}, x, { spends: (x.spends || []).concat([entry]), spent: (x.spent || 0) + amount }) : x);
+    render();
+    const back = Object.assign({}, rawSrc); delete back.id;
+    const FV = firebase.firestore.FieldValue;
+    const saving = (async () => {
+      const stored = rawSp.e && state.key ? await sealAmount(entry) : entry;
+      const b = state.db.batch(); b.update(itemRef(splitId), { spends: FV.arrayUnion(stored) }); b.delete(itemRef(srcId)); await b.commit();
+      return stored;
+    })();
+    write(() => saving);
+    const left = (Number(sp.amount) || 0) - (sp.spent || 0) - amount;
+    showUndo('״' + src.name + '״ (' + fmt(amount) + ') נוסף ל' + sp.name + ' · ' + (left >= 0 ? 'נשארו ' + fmt(left) : 'חריגה של ' + fmt(-left)), () => {
+      state.items = before; // the family's live data takes over again right after
+      render();
+      write(async () => {
+        const stored = await saving;
+        const b = state.db.batch(); b.set(itemRef(srcId), back); b.update(itemRef(splitId), { spends: FV.arrayRemove(stored) }); await b.commit();
+      });
+    });
+  }
+  let undoTimer = null;
+  function showUndo(text, onUndo) {
+    let bar = $('undoBar');
+    if (!bar) {
+      bar = el('div', 'undo-bar'); bar.id = 'undoBar'; bar.setAttribute('role', 'status');
+      bar.append(el('span', 'undo-text'), el('button', 'undo-btn', 'ביטול'));
+      document.body.append(bar);
+    }
+    bar.querySelector('.undo-text').textContent = text;
+    const btn = bar.querySelector('.undo-btn'); btn.type = 'button';
+    btn.onclick = () => { hide(); onUndo(); };
+    function hide() { clearTimeout(undoTimer); bar.hidden = true; }
+    bar.hidden = false; clearTimeout(undoTimer); undoTimer = setTimeout(hide, 7000);
+  }
+
   // Puts the item right before (or after) another one of the same month and numbers the month again.
   function moveItem(movedId, targetId, after) {
     const list = monthItems(state.view);
@@ -724,6 +800,8 @@
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
     row.dataset.id = it.id;
+    if (isSplit(it)) row.dataset.split = '1';
+    else if (canMergeItem(it)) row.dataset.mergeable = '1';
     row.style.setProperty('--cc', CAT_COLOR[catOf(it)]);
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
     const av = el('span', 'avatar', initial(it.name)); av.setAttribute('aria-hidden', 'true');
@@ -2061,7 +2139,7 @@
     $('spListWrap').hidden = !list.length;
     for (const x of list) {
       const li = el('li');
-      li.append(el('span', '', shortDate(x.at)), el('b', 'num', fmt(Number(x.amount) || 0)));
+      li.append(el('span', '', shortDate(x.at) + (x.name ? ' · ' + x.name : '')), el('b', 'num', fmt(Number(x.amount) || 0)));
       const del = el('button', 'sp-del'); del.type = 'button'; del.textContent = '×'; del.setAttribute('aria-label', 'מחיקת הקנייה');
       del.onclick = () => {
         if (!del.classList.contains('armed')) { del.classList.add('armed'); del.textContent = 'למחוק?'; setTimeout(() => { del.classList.remove('armed'); del.textContent = '×'; }, 3000); return; }
