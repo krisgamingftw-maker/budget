@@ -1310,13 +1310,38 @@
       const scale = img.naturalWidth > 2400 ? 2400 / img.naturalWidth : Math.min(3, Math.max(1, 1600 / img.naturalWidth)); // big phone photos are shrunk so the phone does not run out of memory
       const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
       const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cv.width, cv.height);
-      const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data; let sum = 0;
-      for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; sum += g; }
+      const d = cx.getImageData(0, 0, cv.width, cv.height), p = d.data;
+      for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; }
       cx.putImageData(d, 0, 0);
       const paper = cropPaper(cv, d); if (paper) return paper; // a photo of white paper: never inverted, even in a dim shop
-      if (sum / (p.length / 4) < 128) { for (let i = 0; i < p.length; i += 4) { p[i] = p[i + 1] = p[i + 2] = 255 - p[i]; } cx.putImageData(d, 0, 0); } // dark mode screenshot
+      lightBackground(p, cv.width, cv.height); cx.putImageData(d, 0, 0); // dark mode, or a dark header above a light list
       return cv;
     } finally { URL.revokeObjectURL(url); }
+  }
+  // Every part of a screenshot becomes dark text on a light background: a dark-mode page, a navy header,
+  // a light list - each area is judged by its own background (the median of the blocks around it), not the page average.
+  function blockMedians(p, W, H, B) {
+    const bw = Math.ceil(W / B), bh = Math.ceil(H / B), med = new Uint8Array(bw * bh), hist = new Uint32Array(256);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      hist.fill(0); let n = 0;
+      for (let y = by * B; y < Math.min(H, by * B + B); y++) for (let x = bx * B; x < Math.min(W, bx * B + B); x++) { hist[p[(y * W + x) * 4]]++; n++; }
+      let acc = 0, v = 0; for (; v < 256; v++) { acc += hist[v]; if (acc * 2 >= n) break; }
+      med[by * bw + bx] = v;
+    }
+    return { med, bw, bh };
+  }
+  function lightBackground(p, W, H) {
+    const B = 32, { med, bw, bh } = blockMedians(p, W, H, B);
+    const dark = new Uint8Array(bw * bh), nb = [];
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      nb.length = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const y = by + dy, x = bx + dx; if (y >= 0 && x >= 0 && y < bh && x < bw) nb.push(med[y * bw + x]); }
+      nb.sort((a, b) => a - b); dark[by * bw + bx] = nb[nb.length >> 1] < 128 ? 1 : 0;
+    }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (!dark[((y / B) | 0) * bw + ((x / B) | 0)]) continue;
+      const i = (y * W + x) * 4; p[i] = p[i + 1] = p[i + 2] = 255 - p[i];
+    }
   }
   // A photo of a receipt held in the hand: cut out the white paper and enlarge it, so the
   // small print is big enough to read. Screenshots are white edge to edge and stay as they are.
@@ -1373,7 +1398,7 @@
       const amount = best.v;
       // Keep other numbers in the name (like "3 months"), drop the amount and stray symbols such as ✅.
       const i = noDates.lastIndexOf(best.n);
-      const name = (noDates.slice(0, i) + ' ' + noDates.slice(i + best.n.length))
+      const name = (noDates.slice(0, i) + ' ' + noDates.slice(i + best.n.length)).replace(WALLET_RE, ' ')
         .replace(/[^\u0590-\u05FFA-Za-z0-9\s'"״׳-]/g, ' ').replace(/(^|\s)[-'"]+(?=\s|$)/g, ' ')
         .replace(/\s+/g, ' ').trim().replace(/^\d\s+|\s+\d$/g, '').trim(); // a lone digit at the edge is usually a misread icon
       const letters = (w) => (w.match(/[\u0590-\u05FFA-Za-z]/g) || []).length;
@@ -1383,6 +1408,287 @@
       out.push({ name, amount, on: !total });
     }
     return out;
+  }
+  // ---------- bank and card app screenshots: read the page by where things are ----------
+  // Apps like Cal, Max or the bank show every expense as a card: the date and the shop on one side, the amount
+  // on the other (big digits, small agorot and a ₪), sometimes an "Apple Pay" badge in between. Read as plain lines
+  // these get mixed up, so: find every piece of text and where it sits, read each piece again on its own,
+  // read amounts glyph by glyph, and put together what sits on the same card.
+  const WALLET_RE = /(?:^|[^A-Za-z])(?:apple|google|samsung|g)\s*pay(?![A-Za-z])|(?:^|[^A-Za-z])gpay(?![A-Za-z])/gi;
+  const HEADER_RE = /נכון\s*ל|עודכ|חיוב\s*הבא|ס[הח]\s*["״'׳`]{0,2}\s*כ(?![א-ת])|סך\s*ה?כו?ל|יתרה|מסגרת|\btotal\b|\bbalance\b/i;
+  const DATE_RE = new RegExp('\\d{1,4}\\s*[./\\-]\\s*\\d{1,2}\\s*[./\\-]\\s*\\d{2,4}|(?:^|\\D)\\d{1,2}\\s*/\\s*\\d{1,2}(?!\\d)|\\d{1,2}\\s*(?:ב|ל)?' + MONTHS_RE, 'i');
+  const lettersIn = (s) => (s.match(/[֐-׿A-Za-z]/g) || []).length;
+  function nameOk(name) {
+    const words = name.split(' ').filter(Boolean);
+    return words.some(w => lettersIn(w) >= 3) || (words.length === 1 && lettersIn(words[0]) >= 2);
+  }
+  function tidyName(str) {
+    return stripDates(cleanLine(str)).replace(WALLET_RE, ' ')
+      .replace(/[^֐-׿A-Za-z0-9\s'"״׳&-]/g, ' ').replace(/(^|\s)[-'"&]+(?=\s|$)/g, ' ')
+      .replace(/\s+/g, ' ').trim().replace(/^\d\s+|\s+\d$/g, '').trim();
+  }
+  // What a piece of text is: a date, an amount on its own, a name, or a whole "name + amount" line.
+  function classifyPiece(t) {
+    const raw = String(t || ''), c = cleanLine(raw), hasDate = DATE_RE.test(c);
+    const s = stripDates(c).replace(WALLET_RE, ' ').replace(/[wW](?=\s*\d)/g, ' ').replace(/(\d)\s*[wW](?![A-Za-z])/g, '$1 '); // ₪ is often read as "w"
+    const L = lettersIn(s), digits = /\d/.test(s), shekel = /₪|ש"ח|ש״ח/.test(raw);
+    let kind = L === 0 ? (digits || shekel ? 'amount' : hasDate ? 'date' : 'junk') : (digits ? 'row' : 'text');
+    if (kind === 'amount' && /\d+\s*-\s*\d{4,}/.test(s)) kind = 'junk'; // an account number like 349-267693
+    const sure = !shekel && s.split(/\s+/).some(w => lettersIn(w) >= 3); // clearly words, not a misread amount
+    return { kind, hasDate, text: c, sure };
+  }
+  // Black-on-white pixels of one box (Otsu threshold; light text on a dark card is flipped).
+  function inkOf(cv, bb, pad) {
+    const x0 = Math.max(0, Math.floor(bb.x0 - pad)), y0 = Math.max(0, Math.floor(bb.y0 - pad));
+    const x1 = Math.min(cv.width, Math.ceil(bb.x1 + pad)), y1 = Math.min(cv.height, Math.ceil(bb.y1 + pad));
+    const W = x1 - x0, H = y1 - y0; if (W < 4 || H < 4) return null;
+    const d = cv.getContext('2d').getImageData(x0, y0, W, H).data, n = W * H, hist = new Float64Array(256);
+    for (let i = 0; i < n; i++) hist[d[i * 4]]++;
+    let sum = 0; for (let v = 0; v < 256; v++) sum += v * hist[v];
+    let sB = 0, wB = 0, best = -1, th = 127;
+    for (let v = 0; v < 256; v++) { wB += hist[v]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += v * hist[v]; const m = sB / wB - (sum - sB) / wF, b = wB * wF * m * m; if (b > best) { best = b; th = v; } }
+    let dark = 0; for (let i = 0; i < n; i++) if (d[i * 4] <= th) dark++;
+    const inkIsDark = dark <= n / 2, ink = new Uint8Array(n);
+    for (let i = 0; i < n; i++) ink[i] = (d[i * 4] <= th) === inkIsDark ? 1 : 0;
+    return { x0, y0, W, H, ink };
+  }
+  function inkCanvas(g) {
+    const c = document.createElement('canvas'); c.width = g.W; c.height = g.H;
+    const cx = c.getContext('2d'), id = cx.createImageData(g.W, g.H);
+    for (let i = 0; i < g.ink.length; i++) { const v = g.ink[i] ? 0 : 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+    cx.putImageData(id, 0, 0); return c;
+  }
+  // One line of text, cleaned to black on white and sized the way the reader likes it (about 40px high).
+  function lineCanvas(cv, bb, h) {
+    const g = inkOf(cv, bb, 6); if (!g) return null;
+    const k = h / Math.max(1, bb.y1 - bb.y0), out = document.createElement('canvas');
+    out.width = Math.round(g.W * k) + 40; out.height = Math.round(g.H * k) + 40;
+    const cx = out.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, out.width, out.height);
+    cx.imageSmoothingQuality = 'high'; cx.drawImage(inkCanvas(g), 20, 20, out.width - 40, out.height - 40);
+    return out;
+  }
+  // An amount on its own, like "₪308.45" with small agorot: split it into glyphs, drop the ₪, give every
+  // digit the same size and read only digits. Returns {v, conf} or null.
+  async function readAmountBox(worker, cv, bb) {
+    const g = inkOf(cv, bb, 6); if (!g) return null;
+    const { W, H, ink } = g, lab = new Int32Array(W * H), comps = [];
+    for (let i = 0; i < W * H; i++) {
+      if (!ink[i] || lab[i]) continue;
+      const c = { x0: W, y0: H, x1: -1, y1: -1, n: 0 }, st = [i]; comps.push(c); lab[i] = comps.length;
+      while (st.length) {
+        const j = st.pop(), x = j % W, y = (j - x) / W; c.n++;
+        if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+          const k = yy * W + xx; if (ink[k] && !lab[k]) { lab[k] = comps.length; st.push(k); }
+        }
+      }
+    }
+    const big = Math.max(0, ...comps.map(c => c.y1 - c.y0 + 1));
+    const gl = [];
+    for (const c of comps.filter(c => c.n > 3 && !(c.x0 === 0 || c.y0 === 0 || c.x1 === W - 1 || c.y1 === H - 1) || (c.n > 3 && c.y1 - c.y0 + 1 >= big * 0.5)).sort((a, b) => a.x0 - b.x0)) {
+      const last = gl[gl.length - 1], ov = last ? Math.min(last.x1, c.x1) - Math.max(last.x0, c.x0) : -1;
+      if (last && ov > 0.5 * Math.min(last.x1 - last.x0, c.x1 - c.x0)) { last.x0 = Math.min(last.x0, c.x0); last.x1 = Math.max(last.x1, c.x1); last.y0 = Math.min(last.y0, c.y0); last.y1 = Math.max(last.y1, c.y1); }
+      else gl.push(Object.assign({}, c));
+    }
+    if (!gl.length || gl.length > 16) return null;
+    const maxH = Math.max(...gl.map(q => q.y1 - q.y0 + 1)), tall = gl.filter(q => q.y1 - q.y0 + 1 >= 0.7 * maxH);
+    const top = Math.min(...tall.map(q => q.y0)), base = Math.max(...tall.map(q => q.y1));
+    for (const q of gl) {
+      const h = q.y1 - q.y0 + 1, w = q.x1 - q.x0 + 1;
+      if (w < 0.25 * maxH && h < 0.5 * maxH && q.y0 > top + 0.55 * (base - top)) q.dot = true; // a point or a comma on the baseline
+      else if (h < 0.3 * maxH && w > 1.3 * h && q.y1 < base - 0.15 * maxH) q.drop = true; // a minus sign (the amount is kept as it is)
+      else if (h < 0.2 * maxH && w < 0.2 * maxH) q.drop = true; // a speck
+    }
+    let keep = gl.filter(q => !q.drop);
+    const src = inkCanvas(g);
+    const single = async (q) => {
+      const h = q.y1 - q.y0 + 1, w = q.x1 - q.x0 + 1, k = 60 / h, c = document.createElement('canvas');
+      c.width = Math.round(w * k) + 60; c.height = 120; const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+      cx.drawImage(src, q.x0, q.y0, w, h, 30, 30, Math.round(w * k), 60);
+      return (await worker.recognize(c)).data.text.trim();
+    };
+    // the ₪ sits at one end; the reader cannot tell it from a digit when it has to pick a digit, so ask first
+    await worker.setParameters({ tessedit_pageseg_mode: '10', tessedit_char_whitelist: '0123456789₪' });
+    for (const end of ['first', 'last']) {
+      const solid = keep.filter(q => !q.dot); const q = end === 'first' ? solid[0] : solid[solid.length - 1];
+      if (!q || solid.length < 2) continue;
+      const t = await single(q); if (t === '' || /₪/.test(t)) keep = keep.filter(z => z !== q);
+    }
+    while (keep.length && keep[0].dot) keep.shift(); while (keep.length && keep[keep.length - 1].dot) keep.pop();
+    const digitsOnly = keep.filter(q => !q.dot);
+    if (!digitsOnly.length) return null;
+    // small agorot printed without a point: "45⁰⁰"
+    if (!keep.some(q => q.dot) && digitsOnly.length >= 3) {
+      const hs = digitsOnly.map(q => q.y1 - q.y0 + 1), top = Math.max(...hs), n = hs.length;
+      if (hs[n - 1] < 0.8 * top && hs[n - 2] < 0.8 * top && hs[n - 3] >= 0.9 * top) keep.splice(keep.indexOf(digitsOnly[n - 2]), 0, { dot: true });
+    }
+    // a separator with three digits after it is a thousands comma: leave it out, the reader copes better
+    keep = keep.filter((q, i) => { if (!q.dot) return true; let n = 0, j = i + 1; while (j < keep.length && !keep[j].dot) { n++; j++; } return n !== 3; });
+    const S = 50, GAP = 14, widths = keep.map(q => q.dot ? 8 : Math.max(6, Math.round((q.x1 - q.x0 + 1) * S / (q.y1 - q.y0 + 1))));
+    const out = document.createElement('canvas'); out.width = widths.reduce((a, w) => a + w + GAP, 40); out.height = S + 40;
+    const ox = out.getContext('2d'); ox.fillStyle = '#fff'; ox.fillRect(0, 0, out.width, out.height); ox.imageSmoothingQuality = 'high';
+    let X = 20;
+    keep.forEach((q, i) => {
+      if (q.dot) { ox.fillStyle = '#000'; ox.fillRect(X, 20 + S - 8, 8, 8); }
+      else ox.drawImage(src, q.x0, q.y0, q.x1 - q.x0 + 1, q.y1 - q.y0 + 1, X, 20, widths[i], S);
+      X += widths[i] + GAP;
+    });
+    await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.' });
+    const rd = (await worker.recognize(out)).data, t = String(rd.text || '').replace(/[^\d.]/g, ''), r2conf = rd.confidence || 0;
+    await worker.setParameters({ tessedit_char_whitelist: '' });
+    const v = amountFromDigits(t);
+    return v ? { v, conf: r2conf } : null;
+  }
+  // "1.250.00" → 1250, "45.00" → 45, "1.250" → 1250 (three digits after a point are thousands)
+  function amountFromDigits(t) {
+    const parts = String(t || '').split('.').filter((p, i, a) => p !== '' || i === a.length - 1);
+    if (!parts.length || !parts.join('')) return null;
+    let s;
+    if (parts.length === 1) s = parts[0];
+    else { const last = parts[parts.length - 1]; s = last.length && last.length <= 2 ? parts.slice(0, -1).join('') + '.' + last : parts.join(''); }
+    const v = Number(s);
+    return v > 0 && v < 1000000 ? Math.round(v * 100) / 100 : null;
+  }
+  // Puts the pieces of a page back together. items: {x0, y0, x1, y1, kind, text, hasDate, amount, name}.
+  // An amount on its own takes the names (and dates) that sit beside it on the same card.
+  function groupLayout(items) {
+    const cy = b => (b.y0 + b.y1) / 2, hh = b => Math.max(1, b.y1 - b.y0);
+    const anchors = items.filter(b => b.kind === 'amount').map(a => Object.assign({ parts: [] }, a));
+    const near = (a, b) => Math.abs(cy(a) - cy(b)) <= 1.25 * Math.max(hh(a), hh(b));
+    // a "name 12" line on a card that already has its own amount column: the 12 is a misread, the line is the name
+    items = items.map(b => b.kind === 'row' && anchors.some(a => near(a, b) && (a.x1 < b.x0 || b.x1 < a.x0)) ? Object.assign({}, b, { kind: 'text', text: b.name }) : b);
+    for (const b of items) {
+      if (b.kind !== 'text' && b.kind !== 'date') continue;
+      let best = null, bd = Infinity;
+      for (const a of anchors) { const d = Math.abs(cy(a) - cy(b)); if (d < bd && d <= 1.25 * Math.max(hh(a), hh(b))) { bd = d; best = a; } }
+      if (best) best.parts.push(b);
+    }
+    const rows = [];
+    for (const a of anchors) {
+      const parts = a.parts.slice().sort((p, q) => Math.abs(cy(p) - cy(q)) < 0.5 * Math.min(hh(p), hh(q)) ? q.x1 - p.x1 : cy(p) - cy(q));
+      const texts = parts.filter(p => p.kind === 'text');
+      rows.push({ y: cy(a), name: tidyName(texts.map(p => p.text).join(' ')), amount: a.amount,
+        dated: parts.some(p => p.hasDate), head: parts.some(p => HEADER_RE.test(p.text)) });
+    }
+    const dates = items.filter(b => b.kind === 'date');
+    for (const b of items) if (b.kind === 'row' && b.name) rows.push({ y: cy(b), name: b.name, amount: b.amount, head: HEADER_RE.test(b.text),
+      dated: b.hasDate || dates.some(d => near(d, b) || (cy(d) > cy(b) && cy(d) - b.y1 < 1.5 * hh(b))) }); // a date beside it, or just under it
+    rows.sort((p, q) => p.y - q.y);
+    const dated = rows.filter(r => r.dated && r.name && nameOk(r.name)), list = dated.length >= 2;
+    const first = list ? dated[0].y : 0, last = list ? dated[dated.length - 1].y : 0;
+    const out = [];
+    for (const r of rows) {
+      if (!r.name || !nameOk(r.name) || r.amount == null) continue; // an amount with no shop beside it
+      if (list && (r.head || (!r.dated && (r.y < first || r.y > last)))) continue; // a bank page: skip the header (card number, next charge, "as of")
+      out.push({ name: r.name, amount: r.amount, on: !r.head });
+    }
+    out.list = list;
+    return out;
+  }
+  // Text the first look missed (thin grey digits are easy to miss): clusters of pixels clearly darker than
+  // the background around them, joined into words, that no piece found so far covers.
+  function missedPieces(cv, found) {
+    const W0 = cv.width, H0 = cv.height, p = cv.getContext('2d').getImageData(0, 0, W0, H0).data;
+    const { med, bw } = blockMedians(p, W0, H0, 32);
+    const S = 2, W = Math.floor(W0 / S), H = Math.floor(H0 / S), ink = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const X = x * S, Y = y * S;
+      if (p[(Y * W0 + X) * 4] < med[((Y / 32) | 0) * bw + ((X / 32) | 0)] - 40) ink[y * W + x] = 1;
+    }
+    const lab = new Int32Array(W * H), comps = [];
+    for (let i = 0; i < W * H; i++) {
+      if (!ink[i] || lab[i]) continue;
+      const c = { x0: W, y0: H, x1: -1, y1: -1, n: 0 }, st = [i]; comps.push(c); lab[i] = comps.length;
+      while (st.length) {
+        const j = st.pop(), x = j % W, y = (j - x) / W; c.n++;
+        if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+        if (x > 0 && ink[j - 1] && !lab[j - 1]) { lab[j - 1] = comps.length; st.push(j - 1); }
+        if (x < W - 1 && ink[j + 1] && !lab[j + 1]) { lab[j + 1] = comps.length; st.push(j + 1); }
+        if (y > 0 && ink[j - W] && !lab[j - W]) { lab[j - W] = comps.length; st.push(j - W); }
+        if (y < H - 1 && ink[j + W] && !lab[j + W]) { lab[j + W] = comps.length; st.push(j + W); }
+      }
+    }
+    const cs = comps.filter(c => c.n >= 4 && c.y1 - c.y0 < 110 && c.x1 - c.x0 < W * 0.5).sort((a, b) => a.y0 - b.y0);
+    const parent = cs.map((c, i) => i), root = (i) => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+    for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length && cs[j].y0 <= cs[i].y1; j++) {
+      const a = cs[i], b = cs[j], ha = a.y1 - a.y0 + 1, hb = b.y1 - b.y0 + 1;
+      const ov = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) + 1, gap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
+      if (ov >= 0.5 * Math.min(ha, hb) && gap <= 0.8 * Math.max(ha, hb)) parent[root(i)] = root(j);
+    }
+    const boxes = new Map();
+    cs.forEach((c, i) => { const r = root(i), b = boxes.get(r); if (!b) boxes.set(r, { x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, n: 1 }); else { b.x0 = Math.min(b.x0, c.x0); b.y0 = Math.min(b.y0, c.y0); b.x1 = Math.max(b.x1, c.x1); b.y1 = Math.max(b.y1, c.y1); b.n++; } });
+    const covered = (b) => found.some(f => { const ix = Math.min(b.x1, f.x1) - Math.max(b.x0, f.x0), iy = Math.min(b.y1, f.y1) - Math.max(b.y0, f.y0); return ix > 0 && iy > 0 && ix * iy > 0.3 * Math.min((b.x1 - b.x0) * (b.y1 - b.y0), (f.x1 - f.x0) * (f.y1 - f.y0)); });
+    const out = [];
+    for (const b0 of boxes.values()) {
+      const b = { x0: b0.x0 * S, y0: b0.y0 * S, x1: (b0.x1 + 1) * S, y1: (b0.y1 + 1) * S }, h = b.y1 - b.y0, w = b.x1 - b.x0;
+      if (h < 16 || h > 200 || w < 0.5 * h || w > 25 * h || b0.n < 2) continue;
+      if (!covered(b)) out.push(b);
+    }
+    return out;
+  }
+  // Reads a screenshot by its layout. Returns {text, rows}, or null when the reader gave no positions.
+  async function readLayout(worker, cv, onStep) {
+    if (!worker.setParameters) return null;
+    await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: '' }); // find every piece of text, wherever it is
+    const { data } = await worker.recognize(cv, {}, { blocks: true, text: true });
+    if (!data || !Array.isArray(data.blocks)) return null;
+    const lines = [];
+    for (const bl of data.blocks) for (const pa of bl.paragraphs || []) for (const ln of pa.lines || []) if (ln.bbox && ln.bbox.y1 - ln.bbox.y0 >= 8 && (ln.text || '').trim()) lines.push(ln);
+    // plain text in reading order (pieces on the same height joined right to left), for receipts and as a fallback
+    const byY = lines.slice().sort((a, b) => a.bbox.y0 - b.bbox.y0), vis = [];
+    for (const ln of byY) {
+      const c = (ln.bbox.y0 + ln.bbox.y1) / 2, h = ln.bbox.y1 - ln.bbox.y0;
+      const row = vis.find(r => Math.abs(r.c - c) < 0.5 * Math.min(r.h, h));
+      if (row) row.parts.push(ln); else vis.push({ c, h, parts: [ln] });
+    }
+    const text = vis.map(r => r.parts.sort((a, b) => b.bbox.x1 - a.bbox.x1).map(l => l.text.trim()).join(' ')).join('\n');
+    const items = [];
+    let extra = [];
+    try { extra = missedPieces(cv, lines.map(l => l.bbox)).map(bbox => ({ bbox, text: '', confidence: 0, missed: true })); } catch (e) { extra = []; }
+    const all = lines.concat(extra);
+    let i = 0;
+    for (const ln of all) {
+      if (onStep) onStep(i++, all.length);
+      const bb = ln.bbox, first = ln.missed ? { kind: 'unknown', text: '' } : classifyPiece(ln.text);
+      if (first.kind === 'junk') continue;
+      let best = first, conf = ln.confidence || 0;
+      if (first.kind !== 'date' && !(conf >= 90 && first.sure)) {
+        await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' });
+        const lc = lineCanvas(cv, bb, 40);
+        const r = lc ? (await worker.recognize(lc)).data : null;
+        const again = r ? classifyPiece(r.text) : null;
+        if (again && again.kind === 'amount') best = again;
+        else if (ln.missed) { if (again && again.sure && (r.confidence || 0) >= 70) best = again; else if (again && again.kind === 'date') best = again; }
+        else if (again && first.kind === 'text' && again.kind === 'row') { /* a stray digit read into a name: keep it a name */ }
+        else if (again && first.kind !== 'amount' && again.kind !== 'junk' && (r.confidence || 0) >= conf) { best = again; conf = r.confidence; }
+      }
+      if (best.kind === 'unknown') { // a missed piece that does not read as words: maybe a big thin amount
+        const a = await readAmountBox(worker, cv, bb).catch(() => null);
+        if (a && a.conf >= 75) items.push({ x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1, kind: 'amount', text: '', amount: a.v });
+        continue;
+      }
+      const item = { x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1, kind: best.kind, text: best.text, hasDate: !!(first.hasDate || best.hasDate) };
+      if (best.kind === 'amount') {
+        const a = await readAmountBox(worker, cv, bb).catch(() => null);
+        item.amount = a ? a.v : pickAmount(amountsIn(best.text));
+        if (item.amount == null) continue;
+      } else if (best.kind === 'row') {
+        const p = parseScan(best.text)[0]; if (!p) continue;
+        item.name = p.name.replace(WALLET_RE, ' ').replace(/\s+/g, ' ').trim(); item.amount = p.amount;
+        // check the amount once more, glyph by glyph, on the word it was read from (a 6 read as 0 changes the sum)
+        const want = String(p.amount).replace(/\D/g, '');
+        const w = (ln.words || []).filter(x => x.bbox && /\d/.test(x.text)).map(x => ({ x, d: x.text.replace(/\D/g, '') }))
+          .sort((a, b) => (b.d === want) - (a.d === want) || Math.abs(a.d.length - want.length) - Math.abs(b.d.length - want.length))[0];
+        if (w && Math.abs(w.d.length - want.length) <= 1 && !DATE_RE.test(w.x.text)) {
+          const a = await readAmountBox(worker, cv, w.x.bbox).catch(() => null);
+          if (a && a.conf >= 80 && String(a.v).replace(/\D/g, '').length === want.length) item.amount = a.v; // only a misread digit is fixed, never a lost one
+        }
+      }
+      items.push(item);
+    }
+    await worker.setParameters({ tessedit_pageseg_mode: '3', tessedit_char_whitelist: '' });
+    return { text, rows: groupLayout(items) };
   }
   // ---------- receipts: one expense = the shop and the final amount paid ----------
   const TOTAL_WORD = /ס[הח]\s*["״'׳`]{0,2}\s*כ(?![א-ת])|סך\s*ה?כו?ל|total/i;          // סה"כ, סה''כ, סהכ, סך הכל, total
@@ -1525,20 +1831,31 @@
     $('scanList').textContent = ''; $('scanNote').hidden = true; $('scanAll').hidden = true; $('scanOne').hidden = true; $('scanRecRow').hidden = true; $('scanRec').checked = false;
     $('scanStatus').hidden = false; $('scanStatusText').textContent = 'טוען את כלי הסריקה…'; $('scanProg').style.width = '5%';
     $('saveBtn').disabled = true;
-    let worker = null;
+    let worker = null, stage = 80;
     try {
       const T = await loadTesseract();
       const canvas = await prepImage(file);
+      if (!canvas.isPaper) stage = 40; // the first look takes 20–60%, reading piece by piece the rest
       if (token !== scanToken) return;
       worker = await T.createWorker('heb+eng', 1, { logger: m => {
         if (token !== scanToken) return;
-        if (m.status === 'recognizing text') { $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * 80) + '%'; }
+        if (m.status === 'recognizing text') { if (!stage) return; $('scanStatusText').textContent = 'קורא את התמונה…'; $('scanProg').style.width = (20 + m.progress * stage) + '%'; }
         else if (/load|initializ/.test(m.status || '')) { $('scanStatusText').textContent = 'מכין את הסריקה…'; $('scanProg').style.width = (5 + (m.progress || 0) * 15) + '%'; }
       } });
-      if (canvas.isPaper && worker.setParameters) await worker.setParameters({ tessedit_pageseg_mode: '6' }); // one block of text reads a receipt photo best
-      const { data } = await worker.recognize(canvas);
+      let text = '', rows = [];
+      const layout = canvas.isPaper ? null : await readLayout(worker, canvas, (i, n) => {
+        if (token !== scanToken) return;
+        stage = null; $('scanStatusText').textContent = 'קורא שורה אחרי שורה…'; $('scanProg').style.width = (60 + 40 * i / Math.max(1, n)) + '%';
+      });
       if (token !== scanToken) return;
-      const text = data && data.text, rows = parseScan(text), receipt = parseReceipt(text);
+      if (layout) { text = layout.text; rows = layout.rows.length ? layout.rows : parseScan(text); }
+      else {
+        if (canvas.isPaper && worker.setParameters) await worker.setParameters({ tessedit_pageseg_mode: '6' }); // one block of text reads a receipt photo best
+        const { data } = await worker.recognize(canvas);
+        if (token !== scanToken) return;
+        text = data && data.text; rows = parseScan(text);
+      }
+      const receipt = layout && layout.rows.list ? null : parseReceipt(text); // a bank or card list is never one receipt
       $('scanStatus').hidden = true;
       if (receipt) {
         $('scanNote').hidden = false;
@@ -1557,7 +1874,7 @@
         }
         return;
       }
-      const one = parseReceipt(text, true);
+      const one = layout && layout.rows.list ? null : parseReceipt(text, true);
       if (one && rows.length > 1) {
         $('scanOne').hidden = false;
         $('scanOne').onclick = () => {
