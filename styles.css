@@ -506,3 +506,11 @@ button.hchip#afterChip { border: 0; font: inherit; cursor: pointer; }
 .oc-bar i { display: block; height: 100%; border-radius: 9px; background: var(--cc, var(--accent)); }
 .over-cat small { color: var(--muted); font-size: .76rem; }
 .scan-one { border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); color: var(--accent-deep); border-radius: 14px; padding: 10px 12px; font: inherit; font-weight: 600; font-size: .9rem; text-align: start; }
+
+/* press and hold, then drag, to change the order of expenses */
+.list.sorting > .row { transition: transform .18s ease; }
+.list.sorting > .row.dragging { transition: none; position: relative; z-index: 5; overflow: visible; }
+.list.sorting > .row.dragging.dropping { transition: transform .18s ease; }
+.row.dragging > .swipe-in { transform: scale(1.03); box-shadow: 0 12px 28px rgba(0, 0, 0, .18); transition: transform .15s ease, box-shadow .15s ease; }
+.row.dragging.dropping > .swipe-in { transform: none; box-shadow: none; }
+.list.sorting > .row.dragging + .row, .list.sorting > .row + .row.dragging { border-top-color: transparent; }
