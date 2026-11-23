@@ -33,7 +33,7 @@ const rowSel=n=>`#openList .row:nth-child(${n}) .row-body`;
 const {h}=await center('#openList .row:nth-child(1)'); // one row's height, with its border
 // 1. hold the 1st row and drag it down 2 rows
 await p.$eval(rowSel(1),e=>e.scrollIntoView({block:'center'}));await w(200);const scrollBefore=await p.evaluate(()=>scrollY);
-await holdDrag(rowSel(1),h*2.2,{keep:true,shotAt:shot&&path.join(shot,'reorder-drag.png')});
+await holdDrag(rowSel(1),h*2.5,{keep:true,shotAt:shot&&path.join(shot,'reorder-drag.png')});
 let o=await order();ok(o.slice(0,3).join()==='סופר,גז,דירה','dragged down two places: '+o.slice(0,4).join());
 ok(!(await p.isVisible('#fName')),'drag did not open the editor');
 ok(Math.abs((await p.evaluate(()=>scrollY))-scrollBefore)<5,'page did not scroll while dragging');
