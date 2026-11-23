@@ -8,6 +8,7 @@
   const now = new Date();
   const todayKey = keyOf(now.getFullYear(), now.getMonth() + 1);
 
+  let drag = null; // the expense row being moved, see startDrag
   const state = {
     fb: null, auth: null, db: null, user: null,
     hid: null, household: null,
@@ -351,6 +352,8 @@
   }
   function render() {
     if (!state.hid) return;
+    // Rebuilding the list would drop the row under the finger; draw once it is let go.
+    if (drag) { drag.pending = true; return; }
     renderMonth();
     if (state.tab === 'vGoals') renderGoals();
     if (state.tab === 'vSavings') renderSavings();
@@ -439,6 +442,97 @@
   }
 
 
+  // ---------- press and hold, then drag, to change the order ----------
+  // The order is the item's `order` field, shared with the whole family and
+  // copied to the next month with the recurring expenses.
+  const HOLD_MS = 380;
+  function startDrag(li, y) {
+    const ul = li.parentElement;
+    const rows = [...ul.children].filter(x => x.classList.contains('row') && x.dataset.id);
+    const from = rows.indexOf(li);
+    if (from < 0 || rows.length < 2) return;
+    const sy = window.scrollY;
+    const rects = rows.map(r => r.getBoundingClientRect());
+    drag = {
+      li, ul, rows, from, to: from, y0: y, y, sy0: sy, h: rects[from].height,
+      mids: rects.map(r => r.top + sy + r.height / 2),
+      // a little past the first and last rows, so the ends are always reachable
+      minDy: rects[0].top - rects[from].top - rects[0].height / 2, maxDy: rects[rows.length - 1].bottom - rects[from].bottom + rects[rows.length - 1].height / 2,
+      raf: 0, pending: false
+    };
+    ul.classList.add('sorting'); li.classList.add('dragging');
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {}
+    tickDrag();
+  }
+  function placeDrag() {
+    const d = drag;
+    const dy = Math.max(d.minDy, Math.min(d.maxDy, d.y + window.scrollY - d.y0 - d.sy0));
+    const mid = d.mids[d.from] + dy;
+    let to = d.from;
+    for (let i = d.from + 1; i < d.rows.length; i++) if (mid >= d.mids[i]) to = i;
+    for (let i = d.from - 1; i >= 0; i--) if (mid <= d.mids[i]) to = i;
+    d.to = to;
+    d.li.style.transform = 'translateY(' + dy + 'px)';
+    d.rows.forEach((r, i) => {
+      if (i === d.from) return;
+      const sh = d.from < i && i <= to ? -d.h : to <= i && i < d.from ? d.h : 0;
+      r.style.transform = sh ? 'translateY(' + sh + 'px)' : '';
+    });
+  }
+  // Near the top or bottom of the screen the page scrolls by itself.
+  function tickDrag() {
+    if (!drag) return;
+    const edge = 90, bottom = window.innerHeight - 110;
+    let v = 0;
+    if (drag.y < edge) v = -Math.ceil((edge - drag.y) / 6);
+    else if (drag.y > bottom) v = Math.ceil((drag.y - bottom) / 6);
+    if (v) window.scrollBy(0, v);
+    placeDrag();
+    drag.raf = requestAnimationFrame(tickDrag);
+  }
+  function moveDrag(y) { if (drag) { drag.y = y; placeDrag(); } }
+  function endDrag(commit) {
+    const d = drag; if (!d) return;
+    cancelAnimationFrame(d.raf);
+    if (commit) placeDrag();
+    const moved = commit && d.to !== d.from;
+    const finish = () => {
+      d.rows.forEach(r => { r.style.transform = ''; });
+      d.ul.classList.remove('sorting'); d.li.classList.remove('dragging', 'dropping');
+      drag = null;
+      if (moved) moveItem(d.li.dataset.id, d.rows[d.to].dataset.id, d.to > d.from);
+      else if (d.pending) render();
+    };
+    if (!moved) { d.li.classList.add('dropping'); d.rows.forEach(r => { r.style.transform = ''; }); setTimeout(finish, 180); return; }
+    // Settle the row into its new place, then redraw the list in the new order.
+    const target = d.to > d.from
+      ? d.rows.slice(d.from + 1, d.to + 1).reduce((s, r) => s + r.getBoundingClientRect().height, 0)
+      : -d.rows.slice(d.to, d.from).reduce((s, r) => s + r.getBoundingClientRect().height, 0);
+    d.li.classList.add('dropping'); d.li.style.transform = 'translateY(' + target + 'px)';
+    setTimeout(finish, 180);
+  }
+  // Puts the item right before (or after) another one of the same month and numbers the month again.
+  function moveItem(movedId, targetId, after) {
+    const list = monthItems(state.view);
+    const moved = list.find(i => i.id === movedId);
+    const rest = list.filter(i => i.id !== movedId);
+    let at = rest.findIndex(i => i.id === targetId);
+    if (!moved || at < 0) { render(); return; }
+    if (after) at++;
+    rest.splice(at, 0, moved);
+    const next = new Map();
+    rest.forEach((it, n) => { if ((it.order || 0) !== n + 1) next.set(it.id, n + 1); });
+    if (!next.size) { render(); return; }
+    state.items = state.items.map(x => next.has(x.id) ? Object.assign({}, x, { order: next.get(x.id) }) : x);
+    render();
+    write(async () => {
+      const ups = [...next];
+      for (let i = 0; i < ups.length; i += 400) {
+        const b = state.db.batch(); ups.slice(i, i + 400).forEach(([id, order]) => b.update(itemRef(id), { order })); await b.commit();
+      }
+    });
+  }
+
   // ---------- swipe left to delete ----------
   const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>';
   const SWIPE_W = 92;
@@ -447,24 +541,40 @@
     if (openSwipe && openSwipe !== except) { openSwipe.close(); }
   }
   document.addEventListener('pointerdown', e => { if (openSwipe && !openSwipe.outer.contains(e.target)) closeSwipe(); }, true);
-  function swipeable(outer, name, onDelete) {
+  function swipeable(outer, name, onDelete, reorder) {
     const inner = el('div', 'swipe-in');
     while (outer.firstChild) inner.append(outer.firstChild);
     const del = el('button', 'swipe-del'); del.type = 'button';
     del.innerHTML = TRASH_SVG; const dl = el('span', '', 'מחיקה'); del.append(dl);
     del.setAttribute('aria-label', 'מחיקת ' + name); del.tabIndex = -1;
     outer.classList.add('swipeable'); outer.append(del, inner);
-    let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null, justSwiped = false;
+    let x0 = 0, y0 = 0, base = 0, pos = 0, mode = null, id = null, armed = false, armTimer = null, justSwiped = false, holdTimer = null;
     const set = (v, anim) => { pos = v; outer.classList.toggle('swiped', v !== 0); inner.style.transition = anim ? '' : 'none'; inner.style.transform = v ? 'translateX(' + v + 'px)' : ''; };
     const ctl = { outer, close() { set(0, true); disarm(); if (openSwipe === ctl) openSwipe = null; } };
     function disarm() { armed = false; clearTimeout(armTimer); outer.classList.remove('armed'); dl.textContent = 'מחיקה'; }
     inner.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       x0 = e.clientX; y0 = e.clientY; base = pos; mode = null; id = e.pointerId;
+      clearTimeout(holdTimer);
+      // Press and hold (without moving) picks the row up to change its place.
+      if (reorder && pos === 0 && !drag && !e.target.closest('.check, .swipe-del')) {
+        const pid = e.pointerId;
+        holdTimer = setTimeout(() => {
+          if (mode || id !== pid || pos !== 0) return;
+          mode = 'drag'; closeSwipe();
+          try { inner.setPointerCapture(pid); } catch (err) {}
+          startDrag(outer, y0);
+        }, HOLD_MS);
+      }
     });
+    // Once a row is picked up the page must not scroll under the finger.
+    inner.addEventListener('touchmove', e => { if (mode === 'drag' && e.cancelable) e.preventDefault(); }, { passive: false });
+    inner.addEventListener('contextmenu', e => { if (reorder) e.preventDefault(); });
     inner.addEventListener('pointermove', e => {
       if (e.pointerId !== id) return;
+      if (mode === 'drag') { moveDrag(e.clientY); return; }
       const dx = e.clientX - x0, dy = e.clientY - y0;
+      if (!mode && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) clearTimeout(holdTimer);
       if (!mode) {
         if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { mode = 'scroll'; return; }
         if (Math.abs(dx) > 10) { mode = 'swipe'; closeSwipe(ctl); try { inner.setPointerCapture(id); } catch (err) {} }
@@ -477,14 +587,15 @@
       set(v, false);
     });
     const end = e => {
-      if (e.pointerId !== id) return; id = null;
+      if (e.pointerId !== id) return; id = null; clearTimeout(holdTimer);
+      if (mode === 'drag') { mode = null; endDrag(e.type === 'pointerup'); justSwiped = true; setTimeout(() => { justSwiped = false; }, 400); return; }
       if (mode !== 'swipe') return;
       if (pos < -SWIPE_W / 2) { set(-SWIPE_W, true); openSwipe = ctl; } else ctl.close();
       // swallow the click that follows a mouse drag
       justSwiped = true; setTimeout(() => { justSwiped = false; }, 60);
     };
     inner.addEventListener('pointerup', end);
-    inner.addEventListener('pointercancel', e => { if (e.pointerId === id && mode === 'swipe') end(e); else id = null; });
+    inner.addEventListener('pointercancel', e => { if (e.pointerId === id && (mode === 'swipe' || mode === 'drag')) end(e); else if (e.pointerId === id) { id = null; clearTimeout(holdTimer); } });
     // a tap on an open row closes it instead of opening the editor
     inner.addEventListener('click', e => {
       if (justSwiped) { e.stopPropagation(); e.preventDefault(); return; }
@@ -612,6 +723,7 @@
 
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
+    row.dataset.id = it.id;
     row.style.setProperty('--cc', CAT_COLOR[catOf(it)]);
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
     const av = el('span', 'avatar', initial(it.name)); av.setAttribute('aria-hidden', 'true');
@@ -640,14 +752,14 @@
       const add = el('button', 'check add'); add.innerHTML = PLUS_SVG; add.setAttribute('aria-label', 'הוספת קנייה: ' + it.name);
       add.onclick = () => openSheet('spend', it);
       row.append(body, add);
-      return swipeable(row, it.name, () => deleteItem(it));
+      return swipeable(row, it.name, () => deleteItem(it), true);
     }
     const chk = el('button', 'check'); chk.innerHTML = CHECK_SVG;
     chk.setAttribute('aria-pressed', it.paid ? 'true' : 'false');
     chk.setAttribute('aria-label', (it.paid ? 'בטל סימון שולם: ' : 'סמן כשולם: ') + it.name);
     chk.onclick = () => togglePaid(it);
     row.append(body, chk);
-    return swipeable(row, it.name, () => deleteItem(it));
+    return swipeable(row, it.name, () => deleteItem(it), true);
   }
 
   // ---------- goals ----------
