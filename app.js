@@ -60,16 +60,26 @@
   const BASE_SHORT = { home: 'בית', bills: 'חשבונות', food: 'אוכל', car: 'רכב', health: 'בריאות', kids: 'ילדים', fun: 'פנאי', save: 'חיסכון', misc: 'שונות' };
   // Families can add their own categories. They are shared by everyone in the budget
   // (collection `cats`) and come after the built-in ones, before "שונות".
-  let CATS = BASE_CATS.slice(), CAT_BY = {}, CAT_COLOR = {}, CAT_SHORT = {};
+  let CATS = BASE_CATS.slice(), CAT_BY = {}, CAT_COLOR = {}, CAT_SHORT = {}, HIDDEN_BASE = [];
   const CUSTOM_COLORS = ['#f4b183', '#a8d5a2', '#9ecbe8', '#d8b4e2', '#f7d08a', '#f2a7b8', '#8fd3c8', '#c4c99a', '#b9b3f0', '#e8b69a'];
   const CAT_EMOJIS = ['🏷️', '🎁', '🎓', '✈️', '👶', '🐶', '💄', '👗', '🍔', '☕', '🏋️', '📚', '🎮', '💻', '📱', '🧾', '🏥', '🔧', '🌱', '💍', '🕍', '🎂', '🧸', '💸'];
+  // A family can also change the emoji or color of a built-in category. That is saved as
+  // a doc in `cats` with id `b-<builtin id>` and a plain `base` field.
+  const baseDocId = (id) => 'b-' + id;
   function applyCats(custom) {
-    const list = (custom || []).filter(c => c && c.name && !c.locked).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(b.id));
+    const over = {};
+    for (const c of (custom || [])) if (c && c.base && !c.locked && BASE_COLOR[c.base]) over[c.base] = c;
+    // A built-in category can also be hidden ("deleted"). "שונות" always stays, it catches the rest.
+    HIDDEN_BASE = BASE_CATS.filter(c => c.id !== 'misc' && over[c.id] && over[c.id].hidden).map(c => Object.assign({}, c, { e: over[c.id].emoji || c.e }));
+    const base = BASE_CATS.filter(c => !(c.id !== 'misc' && over[c.id] && over[c.id].hidden)).map(c => { const o = over[c.id]; return o ? Object.assign({}, c, { e: o.emoji || c.e }) : c; });
+    const list = (custom || []).filter(c => c && c.name && !c.locked && !c.base).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(b.id));
     const mine = list.map((c, i) => ({ id: c.id, n: String(c.name), e: c.emoji || '🏷️', custom: true, color: c.color || CUSTOM_COLORS[i % CUSTOM_COLORS.length] }));
-    const misc = BASE_CATS[BASE_CATS.length - 1];
-    CATS = BASE_CATS.slice(0, -1).concat(mine, [misc]);
+    const misc = base[base.length - 1];
+    CATS = base.slice(0, -1).concat(mine, [misc]);
     CAT_BY = Object.fromEntries(CATS.map(c => [c.id, c]));
     CAT_COLOR = Object.assign({}, BASE_COLOR); CAT_SHORT = Object.assign({}, BASE_SHORT);
+    for (const id in over) if (over[id].color) CAT_COLOR[id] = over[id].color;
+    base.forEach(c => { c.color = CAT_COLOR[c.id]; });
     mine.forEach(c => { CAT_COLOR[c.id] = c.color; CAT_SHORT[c.id] = c.n; });
   }
   applyCats([]);
@@ -89,8 +99,8 @@
     const t = String(name || ''), low = normName(t);
     // An expense whose name contains a family category's name goes there first.
     for (const c of customCats()) { const n = normName(c.n); if (n.length >= 2 && low.includes(n)) return c.id; }
-    for (const [id, re] of CAT_WORDS) if (re.test(t)) return id; return 'misc'; }
-  const catOf = (it) => (it && it.cat && CAT_BY[it.cat]) ? it.cat : (it && it.linkType === 'sav' ? 'save' : guessCat(it && it.name));
+    for (const [id, re] of CAT_WORDS) if (CAT_BY[id] && re.test(t)) return id; return 'misc'; }
+  const catOf = (it) => (it && it.cat && CAT_BY[it.cat]) ? it.cat : (it && it.linkType === 'sav' && CAT_BY.save ? 'save' : guessCat(it && it.name));
 
   function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
   function initial(name) { const m = String(name || '').trim().match(/[\p{L}\p{N}]/u); return m ? m[0] : '•'; }
@@ -715,6 +725,14 @@
       b.onclick = () => { state.catFilter = state.catFilter === id ? null : id; render(); if (state.catFilter) $('openList').closest('.section').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
       box.append(b);
     }
+    if (ids.length) {
+      const ed = el('button', 'cat-row cat-edit'); ed.type = 'button'; ed.id = 'catEditBtn';
+      ed.setAttribute('aria-label', 'עריכת הקטגוריות');
+      const ic = el('span', 'cat-ico'); ic.innerHTML = EDIT_SVG;
+      ed.append(ic, el('b', null, 'עריכה'), el('span', 'cat-name', 'קטגוריות'));
+      ed.onclick = () => { setTab('vSettings'); setTimeout(() => { const cc = $('catCard'); if (cc) cc.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60); };
+      box.append(ed);
+    }
     const fl = $('catFilterNote');
     fl.hidden = !state.catFilter;
     if (state.catFilter) { const c = CAT_BY[state.catFilter]; $('catFilterText').textContent = 'מוצג רק: ' + c.e + ' ' + c.n; }
@@ -978,21 +996,30 @@
   let catSheetColor = CUSTOM_COLORS[0];
   function renderCatSettings() {
     const box = $('setCats'); if (!box) return; box.textContent = '';
-    const mine = customCats();
-    $('setCatsEmpty').hidden = mine.length > 0;
-    for (const c of mine) {
-      const b = el('button', 'chip cat-chip'); b.type = 'button'; b.style.setProperty('--cc', c.color);
+    $('setCatsEmpty').hidden = true;
+    for (const c of CATS) {
+      const b = el('button', 'chip cat-chip'); b.type = 'button'; b.dataset.c = c.id; b.style.setProperty('--cc', CAT_COLOR[c.id]);
       const ed = el('span', 'ed'); ed.innerHTML = EDIT_SVG; b.append(el('i', 'dot'), c.e + ' ' + c.n, ed);
       b.setAttribute('aria-label', 'עריכת הקטגוריה ' + c.n);
       b.onclick = () => openSheet('catEdit', { id: c.id });
       box.append(b);
     }
+    const hb = $('setCatsHidden'); hb.textContent = '';
+    $('setCatsHiddenWrap').hidden = !HIDDEN_BASE.length;
+    for (const c of HIDDEN_BASE) {
+      const b = el('button', 'chip cat-chip hidden-cat'); b.type = 'button'; b.dataset.c = c.id;
+      b.append(c.e + ' ' + c.n, el('span', 'ed', '↩︎'));
+      b.setAttribute('aria-label', 'החזרת הקטגוריה ' + c.n);
+      b.onclick = () => setBaseHidden(c.id, false);
+      hb.append(b);
+    }
   }
   (function buildCatSheet() {
     const eb = $('cEmojis');
-    for (const e of CAT_EMOJIS) { const b = el('button', 'emoji-btn', e); b.type = 'button'; b.dataset.e = e; b.setAttribute('aria-label', e); b.onclick = () => { $('cEmoji').value = e; syncCatSheet(); }; eb.append(b); }
+    const pick = [...new Set(BASE_CATS.map(c => c.e).concat(CAT_EMOJIS))];
+    for (const e of pick) { const b = el('button', 'emoji-btn', e); b.type = 'button'; b.dataset.e = e; b.setAttribute('aria-label', e); b.onclick = () => { $('cEmoji').value = e; syncCatSheet(); }; eb.append(b); }
     const cb = $('cColors');
-    for (const c of CUSTOM_COLORS) { const b = el('button', 'swatch'); b.type = 'button'; b.dataset.col = c; b.style.background = c; b.setAttribute('aria-label', 'צבע'); b.onclick = () => { catSheetColor = c; syncCatSheet(); }; cb.append(b); }
+    for (const c of [...new Set(Object.values(BASE_COLOR).concat(CUSTOM_COLORS))]) { const b = el('button', 'swatch'); b.type = 'button'; b.dataset.col = c; b.style.background = c; b.setAttribute('aria-label', 'צבע'); b.onclick = () => { catSheetColor = c; syncCatSheet(); }; cb.append(b); }
     $('cEmoji').addEventListener('input', syncCatSheet);
     $('cName').addEventListener('input', syncCatSheet);
   })();
@@ -1003,8 +1030,22 @@
     const pv = $('cPreview'); pv.style.setProperty('--cc', catSheetColor);
     pv.querySelector('.cat-ico').textContent = e || '🏷️';
     pv.querySelector('.cat-name').textContent = $('cName').value.trim() || 'שם הקטגוריה';
+    const ou = $('cOrig'); if (ou) { const sh = state.sheet; const b = sh && sh.mode === 'catEdit' && BASE_COLOR[sh.id] ? BASE_CATS.find(x => x.id === sh.id) : null;
+      ou.hidden = !b || (e === b.e && catSheetColor === BASE_COLOR[b.id]); }
   }
   $('setCatAdd').onclick = () => openSheet('catNew');
+  // Hide or bring back a built-in category. Its saved emoji/color stay with it.
+  function setBaseHidden(id, hidden) {
+    const did = baseDocId(id), prev = (state.cats || []).find(c => c.id === did) || {};
+    const orig = BASE_CATS.find(x => x.id === id);
+    const emoji = prev.emoji || orig.e, color = prev.color || BASE_COLOR[id];
+    const plain = !hidden && emoji === orig.e && color === BASE_COLOR[id];
+    state.cats = (state.cats || []).filter(c => c.id !== did).concat(plain ? [] : [{ id: did, base: id, emoji, color, hidden }]);
+    if (hidden && state.catFilter === id) state.catFilter = null;
+    applyCats(state.cats); buildCatChips(); render();
+    write(async () => plain ? catRef(did).delete() : catRef(did).set(Object.assign(await seal({ emoji }, CAT_SECRET), { base: id, color, hidden, createdAt: Date.now() })));
+  }
+  $('cOrig').onclick = () => { const sh = state.sheet; const b = sh && BASE_CATS.find(x => x.id === sh.id); if (!b) return; $('cEmoji').value = b.e; catSheetColor = BASE_COLOR[b.id]; syncCatSheet(); };
 
   function renderSettings() {
     const h = state.household || {};
@@ -1081,7 +1122,9 @@
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
     sheetError('');
     $('confirmBox').hidden = true; $('sheetActions').hidden = false;
-    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit' || mode === 'catEdit');
+    $('deleteBtn').hidden = !(mode === 'edit' || mode === 'goalEdit' || mode === 'savEdit' || (mode === 'catEdit' && !(obj && obj.id === 'misc')));
+    $('deleteBtn').textContent = mode === 'catEdit' ? 'מחיקת הקטגוריה' : 'מחיקה';
+    $('sheetX').hidden = mode === 'recovery';
     closeNewCat();
     $('saveBtn').textContent = mode === 'deposit' ? 'שמירה' : 'שמירה';
     let focus = null;
@@ -1108,11 +1151,14 @@
     if (mode === 'over') { $('sheetTitle').textContent = (overInfo(state.view).on ? 'ממה נוצרה החריגה ב' : 'ההוצאות ב') + label(state.view); renderOverSheet(); }
     if (mode === 'catNew' || mode === 'catEdit') {
       const c = mode === 'catEdit' ? CAT_BY[obj.id] : null;
-      $('sheetTitle').textContent = c ? 'עריכת קטגוריה' : 'קטגוריה חדשה';
+      $('sheetTitle').textContent = c ? (c.custom ? 'עריכת קטגוריה' : 'עריכת הקטגוריה ' + c.n) : 'קטגוריה חדשה';
+      const builtin = !!(c && !c.custom);
       $('cName').value = c ? c.n : ''; $('cEmoji').value = c ? c.e : '';
+      $('cName').disabled = builtin; $('cNameField').hidden = builtin;
+      $('cBuiltinNote').hidden = !builtin;
       const used = new Set(customCats().map(x => x.color));
-      catSheetColor = c ? c.color : (CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[0]);
-      syncCatSheet(); focus = 'cName';
+      catSheetColor = c ? CAT_COLOR[c.id] : (CUSTOM_COLORS.find(x => !used.has(x)) || CUSTOM_COLORS[0]);
+      syncCatSheet(); focus = builtin ? null : 'cName';
     }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
     $('saveBtn').hidden = mode === 'over'; $('cancelBtn').textContent = mode === 'over' ? 'סגירה' : 'ביטול';
@@ -1156,6 +1202,16 @@
       const id = addCustomCat($('cName').value, $('cEmoji').value, catSheetColor, (m) => { sheetError(m); $('cName').focus(); });
       if (id) { closeSheet(); render(); }
       return;
+    }
+    if (s.mode === 'catEdit' && BASE_COLOR[s.id]) {
+      // built-in category: only the emoji and color change, for the whole family
+      const orig = BASE_CATS.find(x => x.id === s.id);
+      const emoji = $('cEmoji').value.trim() || orig.e, color = catSheetColor, did = baseDocId(s.id);
+      const same = emoji === orig.e && color === BASE_COLOR[s.id];
+      state.cats = (state.cats || []).filter(c => c.id !== did).concat(same ? [] : [{ id: did, base: s.id, emoji, color }]);
+      applyCats(state.cats); buildCatChips(); render();
+      write(async () => same ? catRef(did).delete() : catRef(did).set(Object.assign(await seal({ emoji }, CAT_SECRET), { base: s.id, color, createdAt: Date.now() })));
+      closeSheet(); return;
     }
     if (s.mode === 'catEdit') {
       const name = $('cName').value.trim().replace(/\s+/g, ' '), emoji = $('cEmoji').value.trim() || '🏷️';
@@ -1323,12 +1379,13 @@
   }
   $('sheet').addEventListener('submit', submitSheet);
   $('cancelBtn').onclick = closeSheet;
+  $('sheetX').onclick = closeSheet;
   $('scrim').onclick = closeSheet;
   $('deleteBtn').onclick = () => {
     const s = state.sheet || {};
     const name = s.mode === 'goalEdit' ? (state.goals.find(g => g.id === s.id) || {}).name : s.mode === 'savEdit' ? (state.savings.find(g => g.id === s.id) || {}).name : s.mode === 'catEdit' ? (CAT_BY[s.id] || {}).n : (state.items.find(i => i.id === s.id) || {}).name;
     $('confirmText').textContent = s.mode === 'catEdit'
-      ? 'למחוק את הקטגוריה "' + (name || '') + '"? ההוצאות שבה לא יימחקו, הן יעברו לקטגוריה שמתאימה להן אוטומטית.'
+      ? 'למחוק את הקטגוריה "' + (name || '') + '"? ההוצאות שבה לא יימחקו, הן יעברו לקטגוריה שמתאימה להן אוטומטית (או ל"שונות").' + (BASE_COLOR[s.id] ? ' אפשר להחזיר אותה בהגדרות.' : '')
       : 'למחוק את "' + (name || '') + '"?';
     $('confirmBox').hidden = false; $('sheetActions').hidden = true;
   };
@@ -1337,6 +1394,7 @@
     const s = state.sheet || {}; if (!s.id) return;
     if (s.mode === 'goalEdit') write(() => goalRef(s.id).delete());
     else if (s.mode === 'savEdit') write(() => savRef(s.id).delete());
+    else if (s.mode === 'catEdit' && BASE_COLOR[s.id]) setBaseHidden(s.id, true);
     else if (s.mode === 'catEdit') {
       state.cats = (state.cats || []).filter(c => c.id !== s.id); applyCats(state.cats);
       if (state.catFilter === s.id) state.catFilter = null;
@@ -1404,7 +1462,7 @@
   $('fNewCatCancel').onclick = () => { sheetError(''); closeNewCat(); };
   $('fNewCatName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('fNewCatOk').click(); } });
   $('fName').addEventListener('input', () => { if (catAuto) setCat(null, true); });
-  $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:')) setCat('save', true); });
+  $('fLink').addEventListener('change', () => { if (catAuto && $('fLink').value.startsWith('sav:') && CAT_BY.save) setCat('save', true); });
   // ---------- scan expenses from a picture (runs on the phone, nothing is uploaded) ----------
   let scanToken = 0, tessLoading = null;
   function loadTesseract() {

@@ -190,9 +190,10 @@
         </div>
         <div class="card" id="catCard">
           <h2>קטגוריות</h2>
-          <p>הקטגוריות שתוסיפו כאן משותפות לכל המשפחה, ואפשר לבחור אותן בכל הוצאה. לחיצה על קטגוריה פותחת עריכה.</p>
+          <p>לחיצה על קטגוריה פותחת עריכה: אפשר לשנות לה אימוג'י וצבע או למחוק אותה. לקטגוריות שהוספתם אפשר גם לשנות שם. הכל משותף לכל המשפחה.</p>
           <div class="chips" id="setCats"></div>
           <p id="setCatsEmpty" style="font-size:.85rem">עדיין לא הוספתם קטגוריות משלכם.</p>
+          <div id="setCatsHiddenWrap" hidden><p style="font-size:.85rem;margin:10px 0 6px">קטגוריות שמחקתם (לחיצה מחזירה אותן):</p><div class="chips" id="setCatsHidden"></div></div>
           <div><button class="btn ghost small" id="setCatAdd">הוספת קטגוריה</button></div>
         </div>
         <div class="card" id="encCard">
@@ -245,7 +246,7 @@
 <div class="scrim" id="scrim" hidden></div>
 <form class="sheet" id="sheet" dir="rtl" autocomplete="off" hidden aria-modal="true" role="dialog" aria-labelledby="sheetTitle">
   <div class="grab" aria-hidden="true"></div>
-  <h3 id="sheetTitle"></h3>
+  <div class="sheet-head"><h3 id="sheetTitle"></h3><button type="button" class="sheet-x" id="sheetX" aria-label="סגירה"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div class="sgroup" data-for="item" style="display:flex;flex-direction:column;gap:12px">
     <button type="button" class="scan-btn" id="scanBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg><span><b>סריקת הוצאות מתמונה</b><small>צילום מסך של רשימה, או צילום של קבלה</small></span></button>
     <input type="file" id="scanFile" accept="image/*" hidden>
@@ -339,10 +340,12 @@
   </div>
   <div class="sgroup" data-for="cat" style="display:flex;flex-direction:column;gap:12px">
     <div class="cat-preview"><span class="cat-row on" id="cPreview" aria-hidden="true"><span class="cat-ico">🏷️</span><span class="cat-name">שם הקטגוריה</span></span></div>
-    <label class="field"><span>שם הקטגוריה</span><input id="cName" maxlength="24" placeholder="למשל: מתנות"></label>
+    <p class="sheet-note" id="cBuiltinNote" hidden>זו קטגוריה קבועה של האפליקציה. אפשר לשנות לה אימוג'י וצבע, והשינוי יופיע בכל ההוצאות שלה אצל כל המשפחה.</p>
+    <label class="field" id="cNameField"><span>שם הקטגוריה</span><input id="cName" maxlength="24" placeholder="למשל: מתנות"></label>
     <div class="field"><span>אימוג'י</span><div class="emoji-grid" id="cEmojis"></div>
       <input id="cEmoji" class="newcat-emoji" maxlength="8" placeholder="או הקלידו אחד משלכם" aria-label="אימוג'י משלכם" style="width:100%;text-align:start"></div>
     <div class="field"><span>צבע</span><div class="palette" id="cColors" style="justify-content:flex-start;flex-wrap:wrap"></div></div>
+    <div><button type="button" class="btn ghost small" id="cOrig" hidden>חזרה לאימוג'י ולצבע המקוריים</button></div>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>
