@@ -111,6 +111,7 @@
         </section>
 
         <section class="cat-strip" id="catSec" hidden>
+          <div class="section-head cat-head"><h2>לפי קטגוריה</h2><button type="button" class="bulk-btn cat-edit-btn" id="catEditBtn"><span aria-hidden="true">✏️</span> עריכת קטגוריות</button></div>
           <div class="cat-list" id="catList"></div>
         </section>
 
@@ -346,6 +347,12 @@
       <input id="cEmoji" class="newcat-emoji" maxlength="8" placeholder="או הקלידו אחד משלכם" aria-label="אימוג'י משלכם" style="width:100%;text-align:start"></div>
     <div class="field"><span>צבע</span><div class="palette" id="cColors" style="justify-content:flex-start;flex-wrap:wrap"></div></div>
     <div><button type="button" class="btn ghost small" id="cOrig" hidden>חזרה לאימוג'י ולצבע המקוריים</button></div>
+  </div>
+  <div class="sgroup" data-for="cats" style="display:flex;flex-direction:column;gap:12px">
+    <p class="sheet-note">לחצו על קטגוריה כדי לשנות לה אימוג'י וצבע או למחוק אותה. הכל משותף לכל המשפחה. טיפ: לחיצה ארוכה על קטגוריה בדף החודש פותחת אותה ישר.</p>
+    <div class="chips" id="shCats"></div>
+    <div id="shCatsHiddenWrap" hidden><p class="sheet-note" style="margin:0 0 6px">קטגוריות שמחקתם (לחיצה מחזירה אותן):</p><div class="chips" id="shCatsHidden"></div></div>
+    <div><button type="button" class="btn ghost small" id="shCatAdd">הוספת קטגוריה</button></div>
   </div>
   <div class="sgroup" data-for="rename">
     <label class="field"><span>שם התקציב</span><input id="rName" maxlength="60"></label>

@@ -826,7 +826,7 @@
     const by = {};
     for (const i of items) { const c = catOf(i); (by[c] = by[c] || { total: 0, paid: 0, n: 0 }); by[c].total += itemTotal(i); by[c].paid += itemPaid(i); by[c].n++; }
     const ids = CATS.map(c => c.id).filter(id => by[id]).sort((a, b) => by[b].total - by[a].total);
-    $('catSec').hidden = ids.length < 2 && !state.catFilter;
+    $('catSec').hidden = false; box.hidden = !ids.length;
     for (const id of ids) {
       const c = CAT_BY[id], d = by[id];
       const b = el('button', 'cat-row' + (state.catFilter === id ? ' on' : '')); b.type = 'button';
@@ -834,22 +834,26 @@
       b.setAttribute('aria-pressed', state.catFilter === id ? 'true' : 'false');
       b.setAttribute('aria-label', c.n + ' ' + fmt(d.total));
       b.append(el('span', 'cat-ico', c.e), el('b', 'num', fmt(d.total)), el('span', 'cat-name', CAT_SHORT[id] || c.n));
-      b.onclick = () => { state.catFilter = state.catFilter === id ? null : id; render(); if (state.catFilter) $('openList').closest('.section').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      b.onclick = () => { if (Date.now() - heldAt < 900) return; state.catFilter = state.catFilter === id ? null : id; render(); if (state.catFilter) $('openList').closest('.section').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      longPress(b, () => { heldAt = Date.now(); openSheet('catEdit', { id }); });
       box.append(b);
-    }
-    if (ids.length) {
-      const ed = el('button', 'cat-row cat-edit'); ed.type = 'button'; ed.id = 'catEditBtn';
-      ed.setAttribute('aria-label', 'עריכת הקטגוריות');
-      const ic = el('span', 'cat-ico'); ic.innerHTML = EDIT_SVG;
-      ed.append(ic, el('b', null, 'עריכה'), el('span', 'cat-name', 'קטגוריות'));
-      ed.onclick = () => { setTab('vSettings'); setTimeout(() => { const cc = $('catCard'); if (cc) cc.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60); };
-      box.append(ed);
     }
     const fl = $('catFilterNote');
     fl.hidden = !state.catFilter;
     if (state.catFilter) { const c = CAT_BY[state.catFilter]; $('catFilterText').textContent = 'מוצג רק: ' + c.e + ' ' + c.n; }
   }
   $('catClear').onclick = () => { state.catFilter = null; render(); };
+  $('catEditBtn').onclick = () => openSheet('cats');
+  let heldAt = 0;
+  // Holding a category tile for half a second opens its editor (a tap still filters).
+  function longPress(node, fn) {
+    let t = null, x = 0, y = 0;
+    const stop = () => { clearTimeout(t); t = null; };
+    node.addEventListener('pointerdown', e => { x = e.clientX; y = e.clientY; stop(); t = setTimeout(() => { t = null; if (navigator.vibrate) try { navigator.vibrate(15); } catch (er) {} fn(); }, 500); });
+    node.addEventListener('pointermove', e => { if (t && Math.hypot(e.clientX - x, e.clientY - y) > 10) stop(); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => node.addEventListener(ev, stop));
+    node.addEventListener('contextmenu', e => e.preventDefault());
+  }
 
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
@@ -1112,17 +1116,22 @@
   // ---------- family categories (settings + sheet) ----------
   let catSheetColor = CUSTOM_COLORS[0];
   function renderCatSettings() {
-    const box = $('setCats'); if (!box) return; box.textContent = '';
-    $('setCatsEmpty').hidden = true;
+    fillCatChips($('setCats'), $('setCatsHidden'), $('setCatsHiddenWrap'), false);
+    if (state.sheet && state.sheet.mode === 'cats') fillCatChips($('shCats'), $('shCatsHidden'), $('shCatsHiddenWrap'), true);
+  }
+  // Every category as a chip that opens its editor, plus deleted built-ins to bring back.
+  // fromSheet: the editor returns to the categories sheet when it closes.
+  function fillCatChips(box, hb, hw, fromSheet) {
+    if (!box) return; box.textContent = '';
     for (const c of CATS) {
       const b = el('button', 'chip cat-chip'); b.type = 'button'; b.dataset.c = c.id; b.style.setProperty('--cc', CAT_COLOR[c.id]);
       const ed = el('span', 'ed'); ed.innerHTML = EDIT_SVG; b.append(el('i', 'dot'), c.e + ' ' + c.n, ed);
       b.setAttribute('aria-label', 'עריכת הקטגוריה ' + c.n);
-      b.onclick = () => openSheet('catEdit', { id: c.id });
+      b.onclick = () => { openSheet('catEdit', { id: c.id }); if (fromSheet) state.sheet.back = true; };
       box.append(b);
     }
-    const hb = $('setCatsHidden'); hb.textContent = '';
-    $('setCatsHiddenWrap').hidden = !HIDDEN_BASE.length;
+    hb.textContent = '';
+    hw.hidden = !HIDDEN_BASE.length;
     for (const c of HIDDEN_BASE) {
       const b = el('button', 'chip cat-chip hidden-cat'); b.type = 'button'; b.dataset.c = c.id;
       b.append(c.e + ' ' + c.n, el('span', 'ed', '↩︎'));
@@ -1151,6 +1160,7 @@
       ou.hidden = !b || (e === b.e && catSheetColor === BASE_COLOR[b.id]); }
   }
   $('setCatAdd').onclick = () => openSheet('catNew');
+  $('shCatAdd').onclick = () => { openSheet('catNew'); state.sheet.back = true; };
   // Hide or bring back a built-in category. Its saved emoji/color stay with it.
   function setBaseHidden(id, hidden) {
     const did = baseDocId(id), prev = (state.cats || []).find(c => c.id === did) || {};
@@ -1233,7 +1243,7 @@
   $('incAdd').onclick = () => { const li = incRow(); $('incList').append(li); li.querySelector('.inc-name').focus(); };
   $('fIncome').addEventListener('input', updIncTotal);
 
-  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat', over: 'over' };
+  const GROUP = { add: 'item', edit: 'item', income: 'income', goalNew: 'goal', goalEdit: 'goal', deposit: 'deposit', rename: 'rename', encpass: 'encpass', recovery: 'recovery', savNew: 'saving', savEdit: 'saving', savBal: 'savbal', spend: 'spend', joinOther: 'joinother', scan: 'scan', catNew: 'cat', catEdit: 'cat', over: 'over', cats: 'cats' };
   function openSheet(mode, obj) {
     state.sheet = { mode, id: obj ? obj.id : null };
     document.querySelectorAll('.sgroup').forEach(g => { g.hidden = g.dataset.for !== GROUP[mode]; });
@@ -1265,6 +1275,7 @@
       $('epPass').value = ''; $('epPass2').value = ''; focus = 'epPass';
     }
     if (mode === 'recovery') { $('sheetTitle').textContent = 'קוד שחזור'; $('recCode').textContent = prettyRecovery(obj.code); $('recSaved').checked = false; }
+    if (mode === 'cats') { $('sheetTitle').textContent = 'הקטגוריות שלנו'; fillCatChips($('shCats'), $('shCatsHidden'), $('shCatsHiddenWrap'), true); }
     if (mode === 'over') { $('sheetTitle').textContent = (overInfo(state.view).on ? 'ממה נוצרה החריגה ב' : 'ההוצאות ב') + label(state.view); renderOverSheet(); }
     if (mode === 'catNew' || mode === 'catEdit') {
       const c = mode === 'catEdit' ? CAT_BY[obj.id] : null;
@@ -1278,7 +1289,7 @@
       syncCatSheet(); focus = builtin ? null : 'cName';
     }
     if (mode === 'rename') { $('sheetTitle').textContent = 'שם התקציב'; $('rName').value = (state.household && state.household.name) || ''; focus = 'rName'; }
-    $('saveBtn').hidden = mode === 'over'; $('cancelBtn').textContent = mode === 'over' ? 'סגירה' : 'ביטול';
+    $('saveBtn').hidden = mode === 'over' || mode === 'cats'; $('cancelBtn').textContent = mode === 'over' || mode === 'cats' ? 'סגירה' : 'ביטול';
     $('saveBtn').textContent = mode === 'scan' ? 'הוספה' : mode === 'joinOther' ? 'הצטרפות' : mode === 'recovery' ? 'סיום' : mode === 'encpass' && obj && obj.enable ? 'המשך' : 'שמירה';
     $('saveBtn').disabled = mode === 'recovery';
     $('cancelBtn').hidden = mode === 'recovery';
@@ -1287,6 +1298,7 @@
     if (focus) setTimeout(() => $(focus).focus(), 260);
   }
   function closeSheet() {
+    if (state.sheet && state.sheet.back) { state.sheet = null; return openSheet('cats'); }
     if (state.sheet && state.sheet.mode === 'scan') scanToken++;
     if (state.sheet && state.sheet.mode === 'recovery' && !$('recSaved').checked) return;
     state.sheet = null; $('saveBtn').disabled = false; $('cancelBtn').hidden = false;
