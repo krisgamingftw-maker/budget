@@ -31,6 +31,18 @@ ${max.map(r=>`<div style="background:#fff;border-radius:12px;margin-bottom:10px;
 const dark=[['גן ילדים','1,850.00'],['ביטוח רכב','389.17'],['ארנונה','612.00'],['חשמל','455.80']];
 await shot('../bank-dark.png',`<html dir=rtl><body style="margin:0;background:#111;color:#eee;font-family:Arial;padding:16px"><div style="font-size:20px;margin:24px 0">תנועות בחשבון</div>
 ${dark.map((r,i)=>`<div style="border-bottom:1px solid #333;padding:14px 0;display:flex;justify-content:space-between"><span style="font-size:16px">${r[0]}</span><span style="color:#999;font-size:13px">0${i+1}/10</span><span style="font-size:16px;direction:ltr">-${r[1]} ₪</span></div>`).join('')}</body></html>`);
+// 4. Leumi-like account page: account holder and number on top, day over month on the right, a red -amount
+//    with the balance ("יתרה") under it, green +amounts for money coming in, names on one or two lines
+const leumi=[['10','נוב\'','לטובת: נועה כהן','העברה מהבנק','-','2,150',''],['10','נוב\'','הפקדת פקדון-נט','','-','640',''],['09','נוב\'','דירקט- מצטבר','','-','95',''],
+ ['09','נוב\'','המבצע: חברת אלפא','זיכוי מלאומי','+','1,240','.50'],['08','נוב\'','לטובת: דן לוי','העב\' לאחר-נייד','-','318','']];
+let bal=9876.54;
+await shot('../bank-leumi.png',`<html dir=rtl><body style="margin:0;background:#fff;font-family:Arial">
+<div style="display:flex;justify-content:space-between;align-items:center;padding:40px 18px 18px;box-shadow:0 2px 6px #ddd"><b style="font-size:17px">ישראלי ישראל-123-45678</b><span style="font-size:20px">🔍 ✉️</span></div>
+<div style="display:flex;justify-content:space-around;font-size:16px;padding:16px 0;border-bottom:1px solid #ddd;color:#444"><span>ראשי</span><b style="border-bottom:3px solid #c00">עובר ושב</b><span>כרטיסי אשראי</span><span>ריכוז יתרות</span></div>
+<div style="padding:0 16px">${leumi.map(r=>{bal-=7;return `<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ddd;padding:22px 0">
+<div style="display:flex;align-items:center;gap:14px"><div style="text-align:center;color:#333"><div style="font-size:26px">${r[0]}</div><div style="font-size:14px">${r[1]}</div></div>
+<div><div style="font-size:17px;font-weight:bold">${r[2]}</div><div style="font-size:15px;color:#555;margin-top:4px">${r[3]}</div></div></div>
+<div style="text-align:left;direction:ltr"><div style="font-size:30px;color:${r[4]==='+'?'#2a8a7a':'#c0103a'}"><span style="font-size:15px">₪</span>${r[4]}${r[5]}<span style="font-size:18px">${r[6]}</span></div><div style="font-size:14px;color:#555">₪${bal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/,',')} יתרה</div></div></div>`}).join('')}</div></body></html>`);
 const c=await b.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
 await c.route(/cdn\.jsdelivr\.net\/npm\/(.+)$/,r=>{let m=r.request().url().match(/cdn\.jsdelivr\.net\/npm\/(@[^/]+\/[^/@]+|[^/@]+)(?:@[^/]+)?\/?(.*)$/);let f=path.join(NM,m[1],m[2]||'');
  if(fs.existsSync(f)&&fs.statSync(f).isDirectory())f=path.join(f,'index.js');
@@ -62,5 +74,11 @@ ok(same(rows,max.map(x=>[x[0],fmt(x[2].replace('₪ ',''))])),'max: every row ex
 await A.click('#cancelBtn');await w(400);
 rows=await scan('../bank-dark.png');
 ok(same(rows,dark.map(x=>[x[0],fmt(x[1])])),'dark bank page: every row exact (minus and ₪ ignored)');
+await A.click('#cancelBtn');await w(400);
+rows=await scan('../bank-leumi.png');
+ok(!rows.some(r=>/ישראלי|45,678|יתרה|9,8|נוב/.test(r.join(' '))),'leumi: no account holder, account number, balance or month in the list');
+const spent=leumi.filter(x=>x[4]==='-');
+ok(rows.filter(r=>r[0]).length===spent.length&&spent.every(x=>rows.some(r=>r[0]&&r[1].startsWith(x[2].replace(':',''))&&r[2]===x[5])),'leumi: each expense ticked with its own name and amount');
+ok(rows.some(r=>!r[0]&&r[2]==='1,240.5'),'leumi: money coming in (+) shown but not ticked');
 await A.click('#cancelBtn');await w(400);
 console.log(fail?fail+' FAILED':'ALL PASSED');await b.close();srv.close();process.exit(fail?1:0)});

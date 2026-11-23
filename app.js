@@ -1542,12 +1542,15 @@
   // What a piece of text is: a date, an amount on its own, a name, or a whole "name + amount" line.
   function classifyPiece(t) {
     const raw = String(t || ''), c = cleanLine(raw), hasDate = DATE_RE.test(c);
-    const s = stripDates(c).replace(WALLET_RE, ' ').replace(/[wW](?=\s*\d)/g, ' ').replace(/(\d)\s*[wW](?![A-Za-z])/g, '$1 '); // ₪ is often read as "w"
+    const s = stripDates(c).replace(WALLET_RE, ' ').replace(/[wW](?=\s*[+\-−–]?\s*\d)/g, ' ').replace(/(\d)\s*[wW](?![A-Za-z])/g, '$1 ') // ₪ is often read as "w"
+      .replace(/\d+\s*-\s*\d{4,}/g, ' '); // an account number like 349-267693
     const L = lettersIn(s), digits = /\d/.test(s), shekel = /₪|ש"ח|ש״ח/.test(raw);
     let kind = L === 0 ? (digits || shekel ? 'amount' : hasDate ? 'date' : 'junk') : (digits ? 'row' : 'text');
-    if (kind === 'amount' && /\d+\s*-\s*\d{4,}/.test(s)) kind = 'junk'; // an account number like 349-267693
+    if (kind === 'amount' && !digits && !shekel) kind = 'junk';
+    if (/יתרה|יתרת|\bbalance\b/i.test(c)) kind = 'junk'; // the balance after each line is not an expense
+    if (new RegExp('^\\s*' + MONTHS_RE + '\\s*$', 'i').test(s)) kind = 'date'; // "נוב'" under the day
     const sure = !shekel && s.split(/\s+/).some(w => lettersIn(w) >= 3); // clearly words, not a misread amount
-    return { kind, hasDate, text: c, sure };
+    return { kind, hasDate: hasDate || kind === 'date', text: c, sure, plus: /\+\s*\d/.test(c) };
   }
   // Black-on-white pixels of one box (Otsu threshold; light text on a dark card is flipped).
   function inkOf(cv, bb, pad) {
@@ -1621,11 +1624,13 @@
       return (await worker.recognize(c)).data.text.trim();
     };
     // the ₪ sits at one end; the reader cannot tell it from a digit when it has to pick a digit, so ask first
-    await worker.setParameters({ tessedit_pageseg_mode: '10', tessedit_char_whitelist: '0123456789₪' });
-    for (const end of ['first', 'last']) {
+    await worker.setParameters({ tessedit_pageseg_mode: '10', tessedit_char_whitelist: '0123456789₪+-' });
+    let plus = false;
+    for (const end of ['first', 'last', 'first']) { // "₪+781.20": the ₪, then the + behind it
       const solid = keep.filter(q => !q.dot); const q = end === 'first' ? solid[0] : solid[solid.length - 1];
       if (!q || solid.length < 2) continue;
-      const t = await single(q); if (t === '' || /₪/.test(t)) keep = keep.filter(z => z !== q);
+      const t = await single(q), small = q.y1 - q.y0 + 1 < 0.75 * maxH;
+      if (/₪/.test(t) || /[+\-]/.test(t) || (t === '' && small)) { keep = keep.filter(z => z !== q); if (/\+/.test(t)) plus = true; }
     }
     while (keep.length && keep[0].dot) keep.shift(); while (keep.length && keep[keep.length - 1].dot) keep.pop();
     const digitsOnly = keep.filter(q => !q.dot);
@@ -1637,20 +1642,31 @@
     }
     // a separator with three digits after it is a thousands comma: leave it out, the reader copes better
     keep = keep.filter((q, i) => { if (!q.dot) return true; let n = 0, j = i + 1; while (j < keep.length && !keep[j].dot) { n++; j++; } return n !== 3; });
-    const S = 50, GAP = 14, widths = keep.map(q => q.dot ? 8 : Math.max(6, Math.round((q.x1 - q.x0 + 1) * S / (q.y1 - q.y0 + 1))));
-    const out = document.createElement('canvas'); out.width = widths.reduce((a, w) => a + w + GAP, 40); out.height = S + 40;
-    const ox = out.getContext('2d'); ox.fillStyle = '#fff'; ox.fillRect(0, 0, out.width, out.height); ox.imageSmoothingQuality = 'high';
-    let X = 20;
-    keep.forEach((q, i) => {
-      if (q.dot) { ox.fillStyle = '#000'; ox.fillRect(X, 20 + S - 8, 8, 8); }
-      else ox.drawImage(src, q.x0, q.y0, q.x1 - q.x0 + 1, q.y1 - q.y0 + 1, X, 20, widths[i], S);
-      X += widths[i] + GAP;
-    });
+    const render = (S, GAP) => {
+      const widths = keep.map(q => q.dot ? Math.round(S / 6) : Math.max(6, Math.round((q.x1 - q.x0 + 1) * S / (q.y1 - q.y0 + 1))));
+      const out = document.createElement('canvas'); out.width = widths.reduce((a, w) => a + w + GAP, 40); out.height = S + 40;
+      const ox = out.getContext('2d'); ox.fillStyle = '#fff'; ox.fillRect(0, 0, out.width, out.height); ox.imageSmoothingQuality = 'high';
+      let X = 20;
+      keep.forEach((q, i) => {
+        if (q.dot) { ox.fillStyle = '#000'; ox.fillRect(X, 20 + S - widths[i], widths[i], widths[i]); }
+        else ox.drawImage(src, q.x0, q.y0, q.x1 - q.x0 + 1, q.y1 - q.y0 + 1, X, 20, widths[i], S);
+        X += widths[i] + GAP;
+      });
+      return out;
+    };
+    // every glyph must come back as one digit; if the reader drops or adds one, read it again at another size
     await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.' });
-    const rd = (await worker.recognize(out)).data, t = String(rd.text || '').replace(/[^\d.]/g, ''), r2conf = rd.confidence || 0;
+    const want = keep.filter(q => !q.dot).length;
+    let first = null;
+    for (const [S, GAP] of [[50, 14], [40, 10], [64, 18], [32, 8]]) {
+      const rd = (await worker.recognize(render(S, GAP))).data, t = String(rd.text || '').replace(/[^\d.]/g, '');
+      const got = { t, conf: rd.confidence || 0 };
+      if (!first) first = got;
+      if (t.replace(/\D/g, '').length === want) { first = got; break; }
+    }
     await worker.setParameters({ tessedit_char_whitelist: '' });
-    const v = amountFromDigits(t);
-    return v ? { v, conf: r2conf } : null;
+    const v = amountFromDigits(first.t);
+    return v ? { v, conf: first.conf, plus } : null;
   }
   // "1.250.00" → 1250, "45.00" → 45, "1.250" → 1250 (three digits after a point are thousands)
   function amountFromDigits(t) {
@@ -1666,6 +1682,15 @@
   // An amount on its own takes the names (and dates) that sit beside it on the same card.
   function groupLayout(items) {
     const cy = b => (b.y0 + b.y1) / 2, hh = b => Math.max(1, b.y1 - b.y0);
+    const xov = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) / Math.max(1, Math.min(a.x1 - a.x0, b.x1 - b.x0));
+    // a date column ("09" over "נוב'", as in Leumi): once two month words line up, everything in that column is a date
+    const months = items.filter(b => b.kind === 'date' && new RegExp('^\\s*' + MONTHS_RE + '\\s*$', 'i').test(b.text));
+    const col = months.length >= 2 ? months.filter(m => months.filter(o => xov(m, o) > 0.6).length >= 2) : [];
+    if (col.length >= 2) {
+      const c = { x0: Math.min(...col.map(m => m.x0)), x1: Math.max(...col.map(m => m.x1)) }, w = c.x1 - c.x0;
+      const wide = { x0: c.x0 - 0.3 * w, x1: c.x1 + 0.3 * w };
+      items = items.map(b => b.kind !== 'date' && b.x0 >= wide.x0 && b.x1 <= wide.x1 ? Object.assign({}, b, { kind: 'date', hasDate: true }) : b);
+    }
     const anchors = items.filter(b => b.kind === 'amount').map(a => Object.assign({ parts: [] }, a));
     const near = (a, b) => Math.abs(cy(a) - cy(b)) <= 1.25 * Math.max(hh(a), hh(b));
     // a "name 12" line on a card that already has its own amount column: the 12 is a misread, the line is the name
@@ -1680,11 +1705,13 @@
     for (const a of anchors) {
       const parts = a.parts.slice().sort((p, q) => Math.abs(cy(p) - cy(q)) < 0.5 * Math.min(hh(p), hh(q)) ? q.x1 - p.x1 : cy(p) - cy(q));
       const texts = parts.filter(p => p.kind === 'text');
-      rows.push({ y: cy(a), name: tidyName(texts.map(p => p.text).join(' ')), amount: a.amount,
+      rows.push({ y: cy(a), name: tidyName(texts.map(p => p.text).join(' ')), amount: a.amount, credit: a.credit,
         dated: parts.some(p => p.hasDate), head: parts.some(p => HEADER_RE.test(p.text)) });
     }
     const dates = items.filter(b => b.kind === 'date');
-    for (const b of items) if (b.kind === 'row' && b.name) rows.push({ y: cy(b), name: b.name, amount: b.amount, head: HEADER_RE.test(b.text),
+    // a second line under an amount, in the same column (a balance the reader garbled): not an expense of its own
+    const underAmount = (b) => anchors.some(a => xov(a, b) > 0.5 && cy(b) > cy(a) && b.y0 - a.y1 < 0.8 * hh(a));
+    for (const b of items) if (b.kind === 'row' && b.name && !underAmount(b)) rows.push({ y: cy(b), name: b.name, amount: b.amount, head: HEADER_RE.test(b.text),
       dated: b.hasDate || dates.some(d => near(d, b) || (cy(d) > cy(b) && cy(d) - b.y1 < 1.5 * hh(b))) }); // a date beside it, or just under it
     rows.sort((p, q) => p.y - q.y);
     const dated = rows.filter(r => r.dated && r.name && nameOk(r.name)), list = dated.length >= 2;
@@ -1693,7 +1720,7 @@
     for (const r of rows) {
       if (!r.name || !nameOk(r.name) || r.amount == null) continue; // an amount with no shop beside it
       if (list && (r.head || (!r.dated && (r.y < first || r.y > last)))) continue; // a bank page: skip the header (card number, next charge, "as of")
-      out.push({ name: r.name, amount: r.amount, on: !r.head });
+      out.push({ name: r.name, amount: r.amount, on: !r.head && !r.credit }); // money coming in (+) is shown, not ticked
     }
     out.list = list;
     return out;
@@ -1783,7 +1810,7 @@
       const item = { x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1, kind: best.kind, text: best.text, hasDate: !!(first.hasDate || best.hasDate) };
       if (best.kind === 'amount') {
         const a = await readAmountBox(worker, cv, bb).catch(() => null);
-        item.amount = a ? a.v : pickAmount(amountsIn(best.text));
+        item.amount = a ? a.v : pickAmount(amountsIn(best.text)); item.credit = !!((a && a.plus) || best.plus);
         if (item.amount == null) continue;
       } else if (best.kind === 'row') {
         const p = parseScan(best.text)[0]; if (!p) continue;
