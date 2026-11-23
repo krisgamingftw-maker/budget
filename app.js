@@ -455,7 +455,7 @@
   // ---------- press and hold, then drag, to change the order ----------
   // The order is the item's `order` field, shared with the whole family and
   // copied to the next month with the recurring expenses.
-  const HOLD_MS = 380;
+  const HOLD_MS = 380, MERGE_WAIT = 450;
   function startDrag(li, y) {
     const ul = li.parentElement;
     const rows = [...ul.children].filter(x => x.classList.contains('row') && x.dataset.id);
@@ -468,7 +468,7 @@
       mids: rects.map(r => r.top + sy + r.height / 2),
       // a little past the first and last rows, so the ends are always reachable
       minDy: rects[0].top - rects[from].top - rects[0].height / 2, maxDy: rects[rows.length - 1].bottom - rects[from].bottom + rects[rows.length - 1].height / 2,
-      hs: rects.map(r => r.height), shift: rows.map(() => 0), over: -1,
+      hs: rects.map(r => r.height), shift: rows.map(() => 0), over: -1, cand: -1, candAt: 0,
       // a plain expense can be dropped onto a budget used in parts (like groceries) to become one of its purchases
       canMerge: li.dataset.mergeable === '1',
       raf: 0, pending: false
@@ -481,17 +481,26 @@
     const d = drag;
     const dy = Math.max(d.minDy, Math.min(d.maxDy, d.y + window.scrollY - d.y0 - d.sy0));
     const mid = d.mids[d.from] + dy;
-    // Held over the middle of a budget used in parts: that budget lights up and the order stays as it is.
-    let over = -1;
-    if (d.canMerge) d.rows.forEach((r, i) => { if (i !== d.from && r.dataset.split === '1' && Math.abs(mid - (d.mids[i] + d.shift[i])) < d.hs[i] * 0.3) over = i; });
+    // Held over the middle of a budget used in parts, that budget lights up at once. Over a regular
+    // expense it lights up after a short pause (MERGE_WAIT), so passing over rows still just reorders.
+    // While over the middle of a row the order stays as it is.
+    let cand = -1;
+    if (d.canMerge) d.rows.forEach((r, i) => {
+      if (i === d.from || !(r.dataset.split === '1' || r.dataset.target === '1')) return;
+      if (Math.abs(mid - (d.mids[i] + d.shift[i])) < d.hs[i] * (r.dataset.split === '1' ? 0.3 : 0.2)) cand = i;
+    });
+    const now = performance.now();
+    if (cand !== d.cand) { d.cand = cand; d.candAt = now; }
+    const over = cand >= 0 && (d.rows[cand].dataset.split === '1' || now - d.candAt >= MERGE_WAIT) ? cand : -1;
     if (over !== d.over) {
       if (d.over >= 0) d.rows[d.over].classList.remove('merge-target');
       if (over >= 0) { d.rows[over].classList.add('merge-target'); try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
       d.li.classList.toggle('merging', over >= 0);
+      if (over >= 0) { const t = d.rows[over]; d.li.querySelector('.swipe-in').dataset.hint = (t.dataset.split === '1' ? 'שחררו כדי להוסיף ל' : 'שחררו כדי לחבר ל') + '״' + (t.dataset.name || '') + '״'; }
       d.over = over;
     }
     d.li.style.transform = 'translateY(' + dy + 'px)';
-    if (over >= 0) return;
+    if (cand >= 0) return;
     let to = d.from;
     for (let i = d.from + 1; i < d.rows.length; i++) if (mid >= d.mids[i]) to = i;
     for (let i = d.from - 1; i >= 0; i--) if (mid <= d.mids[i]) to = i;
@@ -555,9 +564,12 @@
   // A plain expense dropped onto a budget used in parts becomes one of its purchases
   // (with its name), and leaves the list. "ביטול" puts it back as it was.
   const canMergeItem = (it) => !isSplit(it) && !it.linkId && !it.locked && (Number(it.amount) || 0) > 0;
+  // A regular expense that another one can be added into (its amount becomes the sum).
+  const canJoinInto = (it) => !isSplit(it) && !it.linkId && !it.locked;
   function mergeInto(srcId, splitId) {
     const src = state.items.find(x => x.id === srcId), sp = state.items.find(x => x.id === splitId);
     const rawSrc = raw.items.find(x => x.id === srcId), rawSp = raw.items.find(x => x.id === splitId);
+    if (src && sp && rawSrc && rawSp && canMergeItem(src) && canJoinInto(sp)) return joinInto(src, sp, rawSrc, rawSp);
     if (!src || !sp || !rawSrc || !rawSp || !canMergeItem(src) || !isSplit(sp)) { render(); return; }
     const amount = Number(src.amount) || 0;
     const entry = { id: rid(), amount, at: Date.now(), name: src.name };
@@ -579,6 +591,30 @@
       write(async () => {
         const stored = await saving;
         const b = state.db.batch(); b.set(itemRef(srcId), back); b.update(itemRef(splitId), { spends: FV.arrayRemove(stored) }); await b.commit();
+      });
+    });
+  }
+  // A regular expense dropped onto another regular one: the one it lands on keeps its name and
+  // gets both amounts together; the dragged one leaves the list. "ביטול" puts both back.
+  function joinInto(src, tgt, rawSrc, rawTgt) {
+    const add = Number(src.amount) || 0, total = (Number(tgt.amount) || 0) + add;
+    const before = state.items;
+    state.items = state.items.filter(x => x.id !== src.id).map(x => x.id === tgt.id ? Object.assign({}, x, { amount: total }) : x);
+    render();
+    const backSrc = Object.assign({}, rawSrc); delete backSrc.id;
+    const backTgt = Object.assign({}, rawTgt); delete backTgt.id;
+    const saving = (async () => {
+      const b = state.db.batch();
+      b.update(itemRef(tgt.id), await seal({ name: tgt.name, amount: total, cat: catOf(tgt) }, ITEM_SECRET, true));
+      b.delete(itemRef(src.id)); await b.commit();
+    })();
+    write(() => saving);
+    showUndo('״' + src.name + '״ (' + fmt(add) + ') חובר ל״' + tgt.name + '״ · עכשיו ' + fmt(total), () => {
+      state.items = before;
+      render();
+      write(async () => {
+        await saving.catch(() => {});
+        const b = state.db.batch(); b.set(itemRef(src.id), backSrc); b.set(itemRef(tgt.id), backTgt); await b.commit();
       });
     });
   }
@@ -817,9 +853,12 @@
 
   function rowEl(it) {
     const row = el('li', 'row' + (it.paid ? ' paid' : ''));
-    row.dataset.id = it.id;
+    row.dataset.id = it.id; row.dataset.name = it.name || '';
     if (isSplit(it)) row.dataset.split = '1';
-    else if (canMergeItem(it)) row.dataset.mergeable = '1';
+    else {
+      if (canMergeItem(it)) row.dataset.mergeable = '1';
+      if (canJoinInto(it)) row.dataset.target = '1';
+    }
     row.style.setProperty('--cc', CAT_COLOR[catOf(it)]);
     const body = el('button', 'row-body'); body.setAttribute('aria-label', 'עריכת ' + it.name);
     const av = el('span', 'avatar', initial(it.name)); av.setAttribute('aria-hidden', 'true');
